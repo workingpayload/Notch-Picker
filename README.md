@@ -149,12 +149,25 @@ The installer isn't code-signed, so Windows SmartScreen may warn the first time.
 
 **Code signing:** with a code-signing certificate, set `CSC_LINK` (path or base64 of the `.pfx`) and `CSC_KEY_PASSWORD` before `npm run dist`; electron-builder signs the app, the uninstaller and the installer, and records the publisher so auto-updates are only accepted when signed by the same publisher. (Verified with a throwaway self-signed certificate; a trusted certificate is still needed to avoid SmartScreen.) For a certificate in the Windows store or an HSM/Azure Trusted Signing, see electron-builder's [Windows code signing](https://www.electron.build/code-signing-win) options (`win.signtoolOptions` / `win.azureSignOptions`) in `package.json`.
 
+## Releases (GitHub Actions)
+
+`.github/workflows/release.yml` builds the installer on GitHub and publishes it as a release:
+
+```powershell
+npm version 1.18.0 --no-git-tag-version   # bump package.json (and the lockfile)
+git commit -am "Release 1.18.0"
+git tag v1.18.0
+git push origin main --tags
+```
+
+The tag must match `version` in `package.json` (the workflow checks). It runs the tests on Windows, builds `Notch-Picker-Setup-<version>.exe`, and creates the **v1.18.0** release with the installer, its `.blockmap` and `latest.yml`, plus generated release notes. *Actions → Release → Run workflow* does a trial build without a release (download it from the run's artifacts). To sign the installer, add repository secrets `CSC_LINK` (base64 of the `.pfx`) and `CSC_KEY_PASSWORD`; without them it's built unsigned.
+
 ## Updates
 
 The installed app can update itself from a **generic update feed**: any web folder holding the files `npm run dist` writes to `dist\` — `latest.yml`, `Notch-Picker-Setup-<version>.exe` and its `.blockmap` (for example a GitHub release's download folder or an internal file server).
 
 1. Bump `version` in `package.json`, run `npm run dist`, and upload those three files to the feed folder.
-2. In *Settings → Updates*, set *Update feed URL* (https; `http://localhost` also works for testing).
+2. In *Settings → Updates*, set *Update feed URL* (https; `http://localhost` also works for testing). With the GitHub releases above, use `https://github.com/workingpayload/Notch-Picker/releases/latest/download/`.
 
 The app checks 30 s after start and every 6 hours (or *Check now* / *Check for updates* in the tray). With *Download updates automatically* on, a new version downloads in the background and installs the next time the app restarts; a notification and the tray's *Restart to update* do it immediately. Updates are off while no feed is set, and in `npm start` builds.
 
@@ -201,4 +214,4 @@ Copilot CLI writes each session to `%USERPROFILE%\.copilot\session-state\<sessio
 ```powershell
 npm test
 ```
-
+"# Notch-Picker" 

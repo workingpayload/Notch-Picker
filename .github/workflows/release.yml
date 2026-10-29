@@ -1,0 +1,75 @@
+name: Release
+
+# Builds the Windows installer and attaches it to a GitHub Release.
+#  - Push a tag like v1.17.0 (matching "version" in package.json): tests run, the installer is
+#    built, and a release for that tag is created with the installer, its .blockmap and
+#    latest.yml (the app's update feed file).
+#  - Run it by hand (Actions → Release → Run workflow): same build, uploaded as a workflow
+#    artifact only, no release.
+# Code signing is optional: add CSC_LINK (base64 of the .pfx) and CSC_KEY_PASSWORD as repository
+# secrets and the installer is signed; without them it is built unsigned.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version. Bump the version (npm version <x.y.z> --no-git-tag-version), commit, then tag v<x.y.z>."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Build installer
+        run: npm run dist
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: notch-picker-windows
+          path: |
+            dist/Notch-Picker-Setup-*.exe
+            dist/Notch-Picker-Setup-*.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Notch Picker ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/Notch-Picker-Setup-*.exe
+            dist/Notch-Picker-Setup-*.exe.blockmap
+            dist/latest.yml

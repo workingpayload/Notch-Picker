@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Notch Picker Pet settings</title>
+    <link rel="stylesheet" href="settings.css" />
+    <link rel="stylesheet" href="pets.css" />
+  </head>
+  <body>
+    <h1>Desktop pets</h1>
+    <div class="stage" aria-hidden="true">
+      <canvas id="preview"></canvas>
+      <div id="preview-note"></div>
+    </div>
+    <form id="form">
+      <section>
+        <h2>Pets</h2>
+        <label class="toggle">
+          <span>
+            <b>Show pets</b>
+            <small>Pixel pets that follow your sessions: they nap when idle, wander while Copilot works, and jump with a “!” when a session needs you (click one then to open that terminal).</small>
+          </span>
+          <input type="checkbox" name="pet" />
+        </label>
+        <label class="number">
+          <span>
+            <b>Pets</b>
+            <small>Per session: each pet reacts to its own session, wears its colour tag as a collar, shows its name on hover, sleeps while muted and walks off when the session ends.</small>
+          </span>
+          <select name="petMode">
+            <option value="single">One pet for everything</option>
+            <option value="perSession">One pet per session</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Pet</b><small>With one pet for everything.</small></span>
+          <select name="petSingleSpecies">
+            <option value="cat">Cat</option>
+            <option value="dog">Dog</option>
+            <option value="pig">Pig</option>
+            <option value="sheep">Sheep</option>
+            <option value="goat">Goat</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Most pets on screen</b><small>Per session; the sessions that most need you get them first. Each pet uses about 25–30 MB.</small></span>
+          <input type="number" name="petMax" min="1" max="10" step="1" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Look</h2>
+        <label class="number">
+          <span><b>Size</b><small>“Match the notch” follows the notch's size.</small></span>
+          <select name="petSize">
+            <option value="match">Match the notch</option>
+            <option value="tiny">Tiny</option>
+            <option value="small">Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+            <option value="huge">Huge</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Cat colour</b></span>
+          <select name="petColor">
+            <option value="orange">Orange tabby</option>
+            <option value="grey">Grey</option>
+            <option value="black">Black</option>
+            <option value="white">White</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h2>Behaviour</h2>
+        <label class="number">
+          <span><b>Lives on</b><small>“Both” stays on the taskbar and jumps up to the notch when a session needs you.</small></span>
+          <select name="petPlacement">
+            <option value="taskbar">The taskbar</option>
+            <option value="notch">The notch</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Speed</b><small>Walking, running and climbing.</small></span>
+          <select name="petSpeed">
+            <option value="lazy">Lazy</option>
+            <option value="normal">Normal</option>
+            <option value="zippy">Zippy</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Activity</b><small>How often they roam and play, and how soon they nap when idle.</small></span>
+          <select name="petActivity">
+            <option value="calm">Calm</option>
+            <option value="normal">Normal</option>
+            <option value="playful">Playful</option>
+          </select>
+        </label>
+        <label class="toggle">
+          <span><b>Roam the screen</b><small>Climb the screen's sides, hop onto app windows and walk along their tops. Off: they stay on the taskbar.</small></span>
+          <input type="checkbox" name="petRoam" />
+        </label>
+        <label class="toggle">
+          <span><b>Play together</b><small>With a pet per session: greet, chase, nap side by side, sit on each other's heads, knock each other over when tossed.</small></span>
+          <input type="checkbox" name="petPlay" />
+        </label>
+        <label class="toggle">
+          <span><b>Chase the mouse</b><small>Now and then, when the cursor is near the surface a pet is on.</small></span>
+          <input type="checkbox" name="petChaseCursor" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Sounds</h2>
+        <label class="toggle">
+          <span>
+            <b>Pet sounds</b>
+            <small>A meow, woof, oink or baa when a pet's session needs you and when you pet it. Only with the notch's Sound on, and not during Focus Assist.</small>
+          </span>
+          <input type="checkbox" name="petSounds" />
+        </label>
+        <div class="row-actions sound-tests">
+          <span>Listen:</span>
+          <button type="button" data-species="cat">Cat</button>
+          <button type="button" data-species="dog">Dog</button>
+          <button type="button" data-species="pig">Pig</button>
+          <button type="button" data-species="sheep">Sheep</button>
+          <button type="button" data-species="goat">Goat</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Session pets</h2>
+        <div id="sessions" role="list"></div>
+        <small id="sessions-note"></small>
+      </section>
+    </form>
+    <footer><span id="status" role="status"></span></footer>
+    <script src="../pet-sprites.js"></script>
+    <script src="pet-sounds.js"></script>
+    <script src="pets.js"></script>
+  </body>
+</html>

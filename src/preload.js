@@ -1,0 +1,57 @@
+'use strict';
+
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('notchApi', {
+  getSessions: () => ipcRenderer.invoke('sessions:get'),
+  onUpdate: (cb) => ipcRenderer.on('sessions:update', (_e, sessions) => cb(sessions)),
+  onTransition: (cb) => ipcRenderer.on('sessions:transition', (_e, t) => cb(t)),
+  onHover: (cb) => ipcRenderer.on('notch:hover', (_e, hovering) => cb(hovering)),
+  onChime: (cb) => ipcRenderer.on('notch:chime', (_e, kind) => cb(kind)),
+  reportRect: (rect) => ipcRenderer.send('notch:rect', rect),
+  showMenu: () => ipcRenderer.send('menu:show'),
+  focusSession: (id) => ipcRenderer.invoke('session:focus', id),
+  showSessionMenu: (id) => ipcRenderer.send('session:menu', id),
+  revealFile: (sessionId, filePath) => ipcRenderer.send('file:reveal', sessionId, filePath),
+  decideApproval: (id, decision) => ipcRenderer.send('approval:decide', id, decision),
+  answerQuestion: (id, answer) => ipcRenderer.invoke('question:answer', id, answer),
+  requestTyping: () => ipcRenderer.send('notch:request-typing'),
+  renameSession: (id, name) => ipcRenderer.send('session:rename', id, name),
+  renameDone: () => ipcRenderer.send('notch:rename-done'),
+  onRename: (cb) => ipcRenderer.on('notch:rename', (_e, id) => cb(id)),
+  showEndedMenu: (id) => ipcRenderer.send('ended:menu', id),
+  getEnded: () => ipcRenderer.invoke('sessions:get-ended'),
+  onEnded: (cb) => ipcRenderer.on('sessions:ended', (_e, list) => cb(list)),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  testNotification: () => ipcRenderer.invoke('settings:test-notification'),
+  testWebhook: () => ipcRenderer.invoke('settings:test-webhook'),
+  onSettings: (cb) => ipcRenderer.on('settings:changed', (_e, values) => cb(values)),
+  hotkeyStatus: () => ipcRenderer.invoke('settings:hotkey-status'),
+  getUsage: (days) => ipcRenderer.invoke('usage:get', days),
+  getUpdate: () => ipcRenderer.invoke('update:get'),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.send('update:install'),
+  onUpdateState: (cb) => ipcRenderer.on('update:state', (_e, payload) => cb(payload)),
+  getPinned: () => ipcRenderer.invoke('notch:get-pinned'),
+  onPinned: (cb) => ipcRenderer.on('notch:pinned', (_e, pinned) => cb(pinned)),
+  onKeyboard: (cb) => ipcRenderer.on('notch:keyboard', (_e, active) => cb(active)),
+  onAnnounce: (cb) => ipcRenderer.on('notch:announce', (_e, t) => cb(t)),
+  togglePin: () => ipcRenderer.send('notch:toggle-pin'),
+  drag: (phase) => ipcRenderer.send('notch:drag', phase),
+  // Pet settings window.
+  openPetSettings: () => ipcRenderer.send('pets:open'),
+  getPetSessions: () => ipcRenderer.invoke('pets:sessions'),
+  onPetSessions: (cb) => ipcRenderer.on('pets:sessions', (_e, list) => cb(list)),
+  setPetSpecies: (sessionId, species) => ipcRenderer.send('pets:set-species', sessionId, species),
+});
+
+// Desktop pet windows (src/renderer/pet.html).
+contextBridge.exposeInMainWorld('petApi', {
+  onView: (cb) => ipcRenderer.on('pet:view', (_e, view) => cb(view)),
+  onSound: (cb) => ipcRenderer.on('pet:sound', (_e, sound) => cb(sound)),
+  pointer: (phase, type, point) => ipcRenderer.send('pet:pointer', phase, type, point),
+  menu: () => ipcRenderer.send('pet:menu'),
+  ready: (info) => ipcRenderer.send('pet:ready', info),
+  painted: () => ipcRenderer.send('pet:painted'),
+});

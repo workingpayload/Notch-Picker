@@ -1,0 +1,106 @@
+{
+  "name": "notch-picker",
+  "version": "1.17.0",
+  "description": "Dynamic Island-style notch showing live GitHub Copilot CLI session status (Windows; macOS/Linux experimental)",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "keywords": [
+    "copilot",
+    "notch",
+    "electron",
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "author": "Notch Picker",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.copilot.notch",
+    "productName": "Notch Picker",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "src/**/*.ps1",
+      "src/hooks/**"
+    ],
+    "electronLanguages": [
+      "en-US"
+    ],
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/workingpayload/Notch-Picker/releases/latest/download/"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Notch Picker",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "Notch-Picker-Setup-${version}.exe",
+      "include": "build/installer.nsh"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg"
+        },
+        {
+          "target": "zip"
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "LSUIElement": true
+      },
+      "artifactName": "Notch-Picker-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "artifactName": "Notch-Picker-${version}-${arch}.${ext}"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/workingpayload/Notch-Picker.git"
+  }
+}

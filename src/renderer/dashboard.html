@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Notch Picker — Usage</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Copilot CLI usage</h1>
+      <div class="range" role="radiogroup" aria-label="Time range">
+        <button type="button" data-days="7" role="radio">7 days</button>
+        <button type="button" data-days="30" role="radio">30 days</button>
+        <button type="button" data-days="90" role="radio">90 days</button>
+      </div>
+    </header>
+
+    <section class="tiles" aria-label="Totals">
+      <div class="tile"><b id="t-premium">–</b><span>premium requests</span></div>
+      <div class="tile"><b id="t-sessions">–</b><span>sessions</span></div>
+      <div class="tile"><b id="t-prompts">–</b><span>prompts</span></div>
+      <div class="tile"><b id="t-tokens">–</b><span>output tokens</span></div>
+    </section>
+
+    <section>
+      <h2>Premium requests per day</h2>
+      <div id="chart" class="chart" role="img"></div>
+      <div id="chart-axis" class="axis" aria-hidden="true"></div>
+    </section>
+
+    <div class="columns">
+      <section>
+        <h2>By folder</h2>
+        <ol id="folders" class="bars"></ol>
+      </section>
+      <section>
+        <h2>By model</h2>
+        <ol id="models" class="bars"></ol>
+      </section>
+    </div>
+
+    <section>
+      <h2>Top sessions</h2>
+      <ol id="sessions" class="bars"></ol>
+    </section>
+
+    <footer>
+      Counted from your local Copilot CLI session logs (<code>~/.copilot/session-state</code>). Premium requests are
+      user-initiated model calls weighted by the model's multiplier.
+      <span id="quota"></span>
+    </footer>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

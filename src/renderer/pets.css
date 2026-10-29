@@ -1,0 +1,67 @@
+.stage {
+  margin-bottom: 14px;
+  padding: 10px 12px 8px;
+  border-radius: 10px;
+  background: linear-gradient(#232326, #2c2c2e);
+  overflow: hidden;
+}
+
+#preview {
+  display: block;
+  margin: 0 auto;
+  image-rendering: pixelated;
+}
+
+#preview-note {
+  margin-top: 4px;
+  color: #8e8e93;
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.sound-tests {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sound-tests span {
+  color: #8e8e93;
+  margin-right: 2px;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid #3a3a3c;
+}
+
+#sessions .session-row:first-child {
+  border-top: 0;
+}
+
+.session-row .swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #48484a;
+}
+
+.session-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row small {
+  flex: none;
+}
+
+#sessions-note {
+  display: block;
+  padding: 2px 0 8px;
+}

@@ -1,0 +1,22 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  /* Finger drags move the cat; they must not be taken as scrolling or zooming. */
+  touch-action: none;
+}
+
+body.held canvas {
+  cursor: grabbing;
+}

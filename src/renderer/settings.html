@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Notch Picker Settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <h1>Notch Picker</h1>
+    <form id="form">
+      <section>
+        <h2>Appearance</h2>
+        <label class="number">
+          <span><b>Size</b><small>Scales the whole notch.</small></span>
+          <select name="size">
+            <option value="tiny">Tiny</option>
+            <option value="small">Small</option>
+            <option value="normal">Normal</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Show on</b><small>Which monitor gets the notch.</small></span>
+          <select name="display">
+            <option value="primary">Primary display</option>
+            <option value="cursor">Display with the cursor</option>
+            <option value="all">All displays</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Position</b><small>You can also drag the pill sideways; double-click it to snap back.</small></span>
+          <select name="position">
+            <option value="left">Top left</option>
+            <option value="center">Top center</option>
+            <option value="right">Top right</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Theme</b></span>
+          <select name="theme">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="system">Match Windows</option>
+          </select>
+        </label>
+        <label class="number">
+          <span><b>Opacity</b><small>Background of the pill and panel.</small></span>
+          <span class="unit"><input type="number" name="opacity" min="50" max="100" step="5" /> %</span>
+        </label>
+        <label class="toggle">
+          <span><b>Hide during full-screen apps</b><small>Videos, games and presentations — only on that monitor.</small></span>
+          <input type="checkbox" name="hideInFullscreen" />
+        </label>
+        <label class="toggle">
+          <span><b>Compact when idle</b><small>Shrinks to a single dot until something is happening.</small></span>
+          <input type="checkbox" name="compactWhenIdle" />
+        </label>
+        <label class="toggle">
+          <span><b>Auto-hide when idle</b><small>Hides a few seconds after every session goes idle; comes back on any activity.</small></span>
+          <input type="checkbox" name="autoHideWhenIdle" />
+        </label>
+        <label class="number">
+          <span>
+            <b>Pin hotkey</b>
+            <small id="hotkey-help">Toggles the expanded notch from anywhere, e.g. <code>Control+Alt+N</code>. Leave empty to disable.</small>
+          </span>
+          <input type="text" name="hotkey" spellcheck="false" autocomplete="off" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Desktop pets</h2>
+        <label class="toggle">
+          <span>
+            <b>Show pixel pets</b>
+            <small>Pets that follow your sessions, roam the screen and play together. Size, species, speed, sounds and more are in Pet settings.</small>
+          </span>
+          <input type="checkbox" name="pet" />
+        </label>
+        <div class="row-actions">
+          <button id="pet-settings" type="button">Pet settings…</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Privacy</h2>
+        <label class="toggle">
+          <span>
+            <b>Hide from screen sharing</b>
+            <small>The notch (and pets) won't appear in Teams/Zoom shares, recordings or screenshots.</small>
+          </span>
+          <input type="checkbox" name="hideFromScreenCapture" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Alerts</h2>
+        <label class="toggle">
+          <span>
+            <b>Desktop notifications</b>
+            <small>When a session needs approval or is waiting for your answer. Click to jump to its terminal.</small>
+          </span>
+          <input type="checkbox" name="notifications" />
+        </label>
+        <label class="number">
+          <span><b>Notify after</b><small>Skip the alert if you answer within this time.</small></span>
+          <span class="unit"><input type="number" name="notifyDelaySeconds" min="0" max="600" step="1" /> s</span>
+        </label>
+        <label class="toggle">
+          <span><b>Also notify when a turn finishes</b></span>
+          <input type="checkbox" name="notifyOnDone" />
+        </label>
+        <label class="toggle">
+          <span><b>Sound</b><small>Plays a short chime with each alert.</small></span>
+          <input type="checkbox" name="sound" />
+        </label>
+        <label class="toggle">
+          <span><b>Silence during Focus Assist</b><small>No chime while Windows is in quiet hours or presentation mode.</small></span>
+          <input type="checkbox" name="muteInFocusAssist" />
+        </label>
+      </section>
+
+      <section>
+        <h2>Stuck detection</h2>
+        <label class="number">
+          <span><b>Tool running longer than</b><small>Turns the notch orange and alerts once.</small></span>
+          <span class="unit"><input type="number" name="stuckToolMinutes" min="1" max="240" step="1" /> min</span>
+        </label>
+        <label class="number">
+          <span><b>Approval waiting longer than</b><small>Sends a reminder and pulses red.</small></span>
+          <span class="unit"><input type="number" name="stuckApprovalMinutes" min="1" max="240" step="1" /> min</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>Approve &amp; answer from the notch (beta)</h2>
+        <label class="toggle">
+          <span>
+            <b>Approve or deny permission requests in the notch</b>
+            <small>
+              Adds a Copilot CLI hook (<code>~/.copilot/hooks/copilot-notch.json</code>) that sends permission requests here
+              first. Nothing is approved without a click; unanswered requests return to the terminal prompt. Applies to
+              sessions started after turning it on. Turning it off removes the hook.
+            </small>
+          </span>
+          <input type="checkbox" name="approveFromNotch" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>Answer Copilot's questions in the notch</b>
+            <small>
+              Questions Copilot asks you (choices, yes/no, short text) appear in the notch instead of the terminal. Your
+              answer is passed to Copilot; unanswered questions, and forms too complex for the notch, are asked in the
+              terminal as usual. Uses the same hook file; applies to sessions started after turning it on.
+            </small>
+          </span>
+          <input type="checkbox" name="answerFromNotch" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>Only when I'm away from that terminal</b>
+            <small>
+              Requests and questions go to the notch only while the session's terminal isn't the active window, and go
+              back to the terminal as soon as you switch to it. Recommended: requests held in the notch skip Copilot's
+              automatic approvals until you answer or the time runs out.
+            </small>
+          </span>
+          <input type="checkbox" name="approvalOnlyWhenAway" />
+        </label>
+        <label class="number">
+          <span><b>Hand approvals back to the terminal after</b><small>If you don't answer in the notch.</small></span>
+          <span class="unit"><input type="number" name="approvalTimeoutSec" min="10" max="120" step="5" /> s</span>
+        </label>
+        <label class="number">
+          <span><b>Hand questions back to the terminal after</b><small>Leaves time to type an answer.</small></span>
+          <span class="unit"><input type="number" name="questionTimeoutSec" min="15" max="120" step="5" /> s</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>Webhook</h2>
+        <label class="stack">
+          <span>
+            <b>Webhook URL</b>
+            <small>POSTs JSON to an https URL (Slack, Teams workflow, Discord or your own service). Treat it as a secret.</small>
+          </span>
+          <input type="url" name="webhookUrl" placeholder="https://hooks.example.com/…" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="toggle"><span><b>When a session needs you</b></span><input type="checkbox" name="webhookOnAttention" /></label>
+        <label class="toggle"><span><b>When a session is stuck or still waiting</b></span><input type="checkbox" name="webhookOnStuck" /></label>
+        <label class="toggle"><span><b>When a turn finishes</b></span><input type="checkbox" name="webhookOnDone" /></label>
+        <label class="toggle"><span><b>On errors</b></span><input type="checkbox" name="webhookOnError" /></label>
+        <label class="toggle">
+          <span><b>Include details</b><small>Commands, file paths and folders. Off: only session name and status are sent.</small></span>
+          <input type="checkbox" name="webhookIncludeDetails" />
+        </label>
+        <div class="row-actions">
+          <button id="test-webhook" type="button">Send test webhook</button>
+          <span id="webhook-status" role="status"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Updates</h2>
+        <label class="stack">
+          <span>
+            <b>Update feed URL</b>
+            <small>
+              A web address hosting <code>latest.yml</code> and the installer from <code>npm run dist</code> (for example a
+              GitHub release download folder or an internal file server). https only; http works for this computer
+              (<code>http://localhost</code>) when testing. Leave empty to turn updates off.
+            </small>
+          </span>
+          <input type="url" name="updateFeedUrl" placeholder="https://downloads.example.com/notch-picker/" spellcheck="false" autocomplete="off" />
+        </label>
+        <label class="toggle">
+          <span><b>Download updates automatically</b><small>Installs when the app restarts. Off: the tray menu offers the download.</small></span>
+          <input type="checkbox" name="autoUpdate" />
+        </label>
+        <div class="row-actions">
+          <button id="check-update" type="button">Check now</button>
+          <button id="install-update" type="button" hidden>Restart to update</button>
+          <span id="update-status" role="status"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Performance</h2>
+        <label class="toggle">
+          <span>
+            <b>Use hardware acceleration</b>
+            <small>
+              Off (default) draws the notch in software, which uses about half the memory. Turn on only if animations
+              stutter. Takes effect after restarting Notch Picker.
+            </small>
+          </span>
+          <input type="checkbox" name="hardwareAcceleration" />
+        </label>
+      </section>
+    </form>
+    <footer>
+      <button id="test" type="button">Send test notification</button>
+      <span id="status" role="status"></span>
+    </footer>
+    <script src="settings.js"></script>
+  </body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:" />
+    <title>Notch Picker</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="notch" class="notch empty" role="region" aria-label="Copilot CLI sessions">
+      <div class="bar" aria-hidden="true">
+        <span class="indicator"><span class="core"></span></span>
+        <span class="bar-tag" hidden></span>
+        <span class="label">Copilot</span>
+        <span class="detail">no live sessions</span>
+        <span class="meta">
+          <span class="elapsed"></span>
+          <span class="dots"></span>
+        </span>
+      </div>
+      <div class="panel">
+        <div class="panel-header">
+          <span class="title" role="heading" aria-level="1"></span>
+          <span class="quota"></span>
+          <button class="pin" type="button" title="Pin expanded" aria-label="Pin expanded" aria-pressed="false">📌</button>
+        </div>
+        <div class="cards" role="list" aria-label="Sessions"></div>
+      </div>
+    </div>
+    <!-- Screen reader announcements: polite for progress, assertive when Copilot needs you. -->
+    <div id="announce-polite" class="sr-only" role="status" aria-live="polite"></div>
+    <div id="announce-assertive" class="sr-only" role="alert" aria-live="assertive"></div>
+    <script src="../visibility.js"></script>
+    <script src="../mascots.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>

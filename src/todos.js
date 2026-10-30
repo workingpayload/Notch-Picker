@@ -70,4 +70,4 @@ function readPlanTitle(planPath) {
   }
 }
 
-module.exports = { readTodos, readPlanTitle };
+module.exports = { readTodos, readPlanTitle, loadSqlite };

@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { readTodos, readPlanTitle } = require('../src/todos');
-const { parseStatus, GitInfo } = require('../src/git-info');
+const { parseStatus, GitInfo, gitCommand } = require('../src/git-info');
 const { renderTrayIcon, STATUS_COLORS } = require('../src/tray-icon');
 const { SessionTracker } = require('../src/watcher');
 
@@ -90,6 +90,15 @@ test('GitInfo caches per folder and refreshes after the TTL', async () => {
   await new Promise((r) => setImmediate(r));
   assert.equal(calls, 2);
   assert.equal(git.get(null), null);
+});
+
+test('git status for a folder on the WSL share runs Linux git inside the distro', () => {
+  const [file, args] = gitCommand('\\\\wsl.localhost\\Ubuntu-22.04\\home\\me\\app');
+  assert.equal(file, 'wsl.exe');
+  assert.deepEqual(args.slice(0, 7), ['-d', 'Ubuntu-22.04', '-e', 'git', '--no-optional-locks', '-C', '/home/me/app']);
+  assert.equal(gitCommand('\\\\wsl$\\Debian\\srv')[1][1], 'Debian');
+  assert.deepEqual(gitCommand('C:\\repo').slice(0, 1), ['git']);
+  assert.equal(gitCommand('C:\\repo')[1][2], 'C:\\repo');
 });
 
 test('tray icon shows the status colour and an alert badge', () => {

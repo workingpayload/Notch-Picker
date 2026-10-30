@@ -7,31 +7,66 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div id="notch" class="notch empty" role="region" aria-label="Copilot CLI sessions">
-      <div class="bar" aria-hidden="true">
-        <span class="indicator"><span class="core"></span></span>
-        <span class="bar-tag" hidden></span>
-        <span class="label">Copilot</span>
-        <span class="detail">no live sessions</span>
-        <span class="meta">
-          <span class="elapsed"></span>
-          <span class="dots"></span>
-        </span>
-      </div>
-      <div class="panel">
-        <div class="panel-header">
-          <span class="title" role="heading" aria-level="1"></span>
-          <span class="quota"></span>
-          <button class="pin" type="button" title="Pin expanded" aria-label="Pin expanded" aria-pressed="false">📌</button>
+    <div id="island" class="island">
+      <span class="shoulder left" aria-hidden="true"></span>
+      <div id="notch" class="notch empty" role="region" aria-label="Coding agent sessions">
+        <div class="bar" aria-hidden="true">
+          <span class="indicator"><span class="core"></span></span>
+          <img class="art" alt="" hidden draggable="false" />
+          <span class="bar-tag" hidden></span>
+          <span class="label">Copilot</span>
+          <span class="detail">no live sessions</span>
+          <span class="meta">
+            <span class="wave" hidden><i></i><i></i><i></i><i></i><i></i></span>
+            <svg class="ring" viewBox="0 0 16 16" hidden>
+              <circle class="track" cx="8" cy="8" r="6.5" />
+              <circle class="fill" cx="8" cy="8" r="6.5" pathLength="100" />
+            </svg>
+            <span class="elapsed"></span>
+            <span class="dots"></span>
+          </span>
         </div>
-        <div class="cards" role="list" aria-label="Sessions"></div>
+        <div class="banner" hidden>
+          <span class="banner-icon"></span>
+          <span class="banner-text">
+            <b class="banner-title"></b>
+            <span class="banner-sub"></span>
+          </span>
+          <span class="banner-side"></span>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="title" role="heading" aria-level="1"></span>
+            <span class="quota"></span>
+            <button class="timer-chip" type="button" hidden>
+              <svg class="ring" viewBox="0 0 16 16">
+                <circle class="track" cx="8" cy="8" r="6.5" />
+                <circle class="fill" cx="8" cy="8" r="6.5" pathLength="100" />
+              </svg>
+              <span class="clock"></span>
+            </button>
+            <button class="timer-btn" type="button" title="Timer" aria-label="Timer" aria-haspopup="menu" hidden>⏱</button>
+            <button class="pin" type="button" title="Pin expanded" aria-label="Pin expanded" aria-pressed="false">📌</button>
+          </div>
+          <div class="extras" hidden></div>
+          <div class="cards" role="list" aria-label="Sessions"></div>
+        </div>
+      </div>
+      <span class="shoulder right" aria-hidden="true"></span>
+      <div class="bubble" aria-hidden="true">
+        <span class="shoulder left"></span>
+        <div class="bubble-body"></div>
+        <span class="shoulder right"></span>
       </div>
     </div>
-    <!-- Screen reader announcements: polite for progress, assertive when Copilot needs you. -->
+    <!-- Screen reader announcements: polite for progress, assertive when the agent needs you. -->
     <div id="announce-polite" class="sr-only" role="status" aria-live="polite"></div>
     <div id="announce-assertive" class="sr-only" role="alert" aria-live="assertive"></div>
     <script src="../visibility.js"></script>
+    <script src="../island.js"></script>
     <script src="../mascots.js"></script>
+    <script src="../agents.js"></script>
+    <script src="extras.js"></script>
     <script src="renderer.js"></script>
   </body>
 </html>

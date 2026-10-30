@@ -6,22 +6,46 @@ const EMPTY_WIDTH = 170;
 const COLLAPSED_WIDTH = 260;
 const EXPANDED_WIDTH = 380;
 const COLLAPSE_DELAY_MS = 220;
-const TOAST_MS = 4000;
+// Dynamic Island: compact pill, banner card, concave shoulders and the split bubble.
+const ISLAND_WIDTH = 236;
+const BANNER_WIDTH = 330;
+const BANNER_HEIGHT = 58;
+const SHOULDER = 8;
+const BUBBLE_SHOULDER = 6;
+const BUBBLE_WIDTH = 28;
+const PICK_RESET_MS = 15000;
+const LONG_PRESS_MS = 500;
 const CODE_STATUSES = new Set(['approval', 'tool']);
-const STATUS_CLASSES = ['idle', 'done', 'thinking', 'tool', 'agents', 'approval', 'input', 'error', 'stuck'].map((s) => `status-${s}`);
+const STATUS_CLASSES = ['idle', 'done', 'thinking', 'tool', 'agents', 'approval', 'input', 'error', 'stuck', 'media', 'timer'].map((s) => `status-${s}`);
 
+const island = document.getElementById('island');
 const notch = document.getElementById('notch');
 const bar = {
   tag: notch.querySelector('.bar .bar-tag'),
+  art: notch.querySelector('.bar .art'),
   label: notch.querySelector('.bar .label'),
   detail: notch.querySelector('.bar .detail'),
+  wave: notch.querySelector('.bar .wave'),
+  ring: notch.querySelector('.bar .ring'),
   elapsed: notch.querySelector('.bar .elapsed'),
   dots: notch.querySelector('.bar .dots'),
 };
+const bannerEl = notch.querySelector('.banner');
+const bannerParts = {
+  icon: bannerEl.querySelector('.banner-icon'),
+  title: bannerEl.querySelector('.banner-title'),
+  sub: bannerEl.querySelector('.banner-sub'),
+  side: bannerEl.querySelector('.banner-side'),
+};
+const bubbleEl = island.querySelector('.bubble');
+const bubbleBody = bubbleEl.querySelector('.bubble-body');
 const panel = notch.querySelector('.panel');
+const extrasEl = notch.querySelector('.extras');
 const cards = notch.querySelector('.cards');
 const countEl = notch.querySelector('.panel-header .title');
 const quotaEl = notch.querySelector('.panel-header .quota');
+const timerButton = notch.querySelector('.panel-header .timer-btn');
+const timerChip = notch.querySelector('.panel-header .timer-chip');
 const pinButton = notch.querySelector('.panel-header .pin');
 const DOT_WIDTH = 40;
 const SIZE_ZOOM = { tiny: 0.85, small: 1, normal: 1.2 };
@@ -35,10 +59,23 @@ let hovering = false;
 let pinned = false;
 let compact = false;
 let align = 'center';
+// The coding agent whose sessions are shown (Settings → Agent). agentInfo() comes from ../agents.js.
+let agent = 'copilot';
 let collapseTimer = null;
-let toast = null;
-let toastTimer = null;
 let flashTimer = null;
+// Island settings and extras (now playing, quick timer, file shelf) from the main process.
+let islandStyle = true;
+let bannersOn = true;
+let expandOn = 'hover';
+const features = { media: true, shelf: true, battery: true, timer: true };
+let extras = { media: null, timer: null, shelf: [] };
+// What the pill and bubble show (NotchIsland.planIsland); a session scrolled to on the pill.
+let plan = { primary: { kind: 'none', id: 'none' }, secondary: null, more: 0 };
+let pickedId = null;
+let pickTimer = null;
+// After a swipe up or a banner click the pointer is still over the notch: don't re-open on hover.
+let hoverSuppressed = false;
+let dropping = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -74,28 +111,130 @@ function formatElapsed(since) {
 function shortPath(p) {
   if (!p) return '';
   const parts = String(p).split(/[\\/]/).filter(Boolean);
-  return parts.length <= 2 ? p : `…\\${parts.slice(-2).join('\\')}`;
+  // Linux paths (WSL sessions) keep their slashes.
+  const sep = String(p).startsWith('/') ? '/' : '\\';
+  return parts.length <= 2 ? p : `…${sep}${parts.slice(-2).join(sep)}`;
+}
+
+// Banners are cards in Dynamic Island style; otherwise (or with banners off) they are the old
+// text toast in the pill.
+function cardBanners() {
+  return islandStyle && bannersOn;
+}
+
+function bannerShown() {
+  return !!banner && cardBanners() && !expanded && !dropping;
+}
+
+function setElapsed(since) {
+  bar.elapsed.dataset.since = since || '';
+  bar.elapsed.textContent = formatElapsed(since);
+  delete bar.elapsed.dataset.clock;
+}
+
+function setRing(svg, progress) {
+  const fill = svg.querySelector('.fill');
+  if (fill) fill.style.strokeDashoffset = String(100 - Math.max(0, Math.min(1, progress)) * 100);
+}
+
+function makeRing(cls = 'ring') {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('class', cls);
+  svg.setAttribute('viewBox', '0 0 16 16');
+  for (const part of ['track', 'fill']) {
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('class', part);
+    c.setAttribute('cx', '8');
+    c.setAttribute('cy', '8');
+    c.setAttribute('r', '6.5');
+    if (part === 'fill') c.setAttribute('pathLength', '100');
+    svg.append(c);
+  }
+  return svg;
+}
+
+function makeWave(playing = true) {
+  const wave = el('span', `wave${playing ? '' : ' paused'}`);
+  for (let i = 0; i < 5; i++) wave.append(el('i'));
+  return wave;
+}
+
+function setArt(img, src) {
+  if (!src) {
+    img.hidden = true;
+    img.removeAttribute('src');
+    return;
+  }
+  if (img.getAttribute('src') !== src) img.src = src;
+  img.hidden = false;
+}
+
+function timerClock(t, now = Date.now()) {
+  const { formatClock, timerRemaining, timerElapsed } = window.NotchIsland;
+  return t.mode === 'timer' ? formatClock(timerRemaining(t, now), { roundUp: true }) : formatClock(timerElapsed(t, now));
 }
 
 function renderBar() {
-  const top = sessions[0];
-  notch.classList.toggle('empty', !top && !toast);
-  notch.classList.toggle('dot-only', window.NotchVisibility.isDotOnly({ compact, top, toast }));
+  plan = window.NotchIsland.planIsland({
+    sessions,
+    media: features.media ? extras.media : null,
+    timer: features.timer ? extras.timer : null,
+    pickedId,
+  });
+  const primary = plan.primary;
+  const top = primary.kind === 'session' ? primary.session : null;
+  const busy = primary.kind === 'media' || primary.kind === 'timer';
+  const textBanner = banner && !cardBanners() ? banner : null;
+  notch.classList.toggle('empty', primary.kind === 'none' && !banner);
+  notch.classList.toggle('dot-only', window.NotchVisibility.isDotOnly({ compact, top, toast: banner, busy }));
+  notch.classList.toggle('bannered', bannerShown());
+  notch.classList.toggle('text-banner', !!textBanner);
+  notch.classList.remove('has-art');
+  bar.wave.hidden = true;
+  bar.wave.classList.remove('paused');
+  bar.ring.toggleAttribute('hidden', true);
+  bar.label.title = '';
+  setArt(bar.art, null);
 
-  if (toast) {
-    setStatusClass(notch, toast.kind === 'error' ? 'error' : 'done');
+  if (textBanner) {
+    setStatusClass(notch, textBanner.status);
     notch.classList.remove('attention', 'overdue');
-    bar.label.textContent = toast.kind === 'error' ? 'Error' : 'Done';
-    bar.detail.textContent = toast.session.name;
-    bar.elapsed.textContent = '';
-    bar.elapsed.dataset.since = '';
+    bar.label.textContent = textBanner.title;
+    bar.detail.textContent = textBanner.subtitle;
+    setElapsed(null);
+  } else if (primary.kind === 'media') {
+    const m = primary.media;
+    setStatusClass(notch, 'media');
+    notch.classList.remove('attention', 'overdue');
+    if (islandStyle && m.art) {
+      setArt(bar.art, m.art);
+      notch.classList.add('has-art');
+    }
+    bar.label.textContent = islandStyle ? m.title || m.artist : 'Now playing';
+    bar.detail.textContent = islandStyle ? m.artist : [m.title, m.artist].filter(Boolean).join(' — ');
+    bar.label.title = [m.title, m.artist, m.app].filter(Boolean).join(' · ');
+    setElapsed(null);
+    bar.wave.hidden = false;
+  } else if (primary.kind === 'timer') {
+    const t = primary.timer;
+    setStatusClass(notch, 'timer');
+    notch.classList.remove('attention', 'overdue');
+    bar.label.textContent = t.mode === 'timer' ? 'Timer' : 'Stopwatch';
+    bar.detail.textContent = t.runningSince ? '' : 'Paused';
+    setElapsed(null);
+    bar.elapsed.dataset.clock = 'timer';
+    bar.elapsed.textContent = timerClock(t);
+    if (islandStyle) {
+      bar.ring.toggleAttribute('hidden', false);
+      setRing(bar.ring, window.NotchIsland.timerProgress(t));
+    }
   } else if (!top) {
     setStatusClass(notch, 'idle');
     notch.classList.remove('attention', 'overdue');
-    bar.label.textContent = 'Copilot';
+    bar.label.textContent = agentInfo(agent).label;
     bar.detail.textContent = 'no live sessions';
-    bar.elapsed.textContent = '';
-    bar.elapsed.dataset.since = '';
+    setElapsed(null);
   } else {
     const vs = visualStatus(top);
     setStatusClass(notch, vs);
@@ -103,21 +242,30 @@ function renderBar() {
     notch.classList.toggle('attention', alerting);
     notch.classList.toggle('overdue', alerting && top.stuck === 'waiting');
     bar.label.textContent = displayLabel(top);
+    bar.label.title = islandStyle ? `${top.name}${top.detail ? ` — ${top.detail}` : ''}` : '';
     bar.detail.textContent = top.detail || top.name;
-    const since = top.status === 'idle' ? null : top.busySince || top.since;
-    bar.elapsed.dataset.since = since || '';
-    bar.elapsed.textContent = formatElapsed(since);
+    setElapsed(top.status === 'idle' ? null : top.busySince || top.since);
+    if (islandStyle && !top.muted) {
+      // Waveform while the agent thinks; todo progress as a ring.
+      bar.wave.hidden = !(vs === 'thinking' || vs === 'agents');
+      if (top.todos && top.todos.total) {
+        bar.ring.toggleAttribute('hidden', false);
+        setRing(bar.ring, top.todos.done / top.todos.total);
+        bar.ring.setAttribute('aria-label', `${top.todos.done} of ${top.todos.total} todos`);
+      }
+    }
   }
 
   // Colour tag of the session the pill is showing, so you can tell which one it is.
-  const shown = toast ? toast.session : top;
+  const shown = textBanner ? sessions.find((s) => s.id === textBanner.sessionId) || { tag: textBanner.tag, name: textBanner.subtitle } : top;
   const tag = shown && shown.tag;
   bar.tag.hidden = !tag;
   bar.tag.className = tag ? `bar-tag tag-${tag}` : 'bar-tag';
   bar.tag.title = tag ? shown.name : '';
 
   bar.dots.replaceChildren();
-  if (sessions.length > 1) {
+  // In island style the split bubble shows the next activity instead of a dot per session.
+  if (sessions.length > 1 && !islandStyle) {
     for (const s of sessions) {
       const dot = el('i');
       setStatusClass(dot, visualStatus(s));
@@ -127,7 +275,220 @@ function renderBar() {
       bar.dots.append(dot);
     }
   }
+  renderBanner();
+  renderBubble();
+  morphOnChange();
   resize();
+}
+
+// ---- Banners: the pill grows into a card for a few seconds on events ----
+
+let banner = null;
+let bannerQueue = [];
+let bannerTimer = null;
+let bannerEndsAt = 0;
+let bannerRemaining = 0;
+let bannerHover = false;
+let bannerSeq = 0;
+
+function pushBanner(b) {
+  if (!b) return;
+  // As text in the pill there is no room for "needs you" or track changes (the pill shows those).
+  if (!cardBanners() && (b.kind === 'attention' || b.kind === 'media')) return;
+  bannerQueue = bannerQueue.filter((q) => q.key !== b.key);
+  if (!banner || banner.key === b.key || (b.urgent && !banner.urgent)) showBanner(b);
+  else {
+    bannerQueue.push(b);
+    if (bannerQueue.length > 4) bannerQueue.shift();
+  }
+}
+
+function showBanner(b) {
+  banner = { ...b, id: ++bannerSeq };
+  // While the pointer is on the banner it waits; it gets its full time once the pointer leaves.
+  if (bannerHover) {
+    clearTimeout(bannerTimer);
+    bannerRemaining = b.ms || 3500;
+  } else startBannerTimer(b.ms || 3500);
+  renderBar();
+}
+
+function startBannerTimer(ms) {
+  clearTimeout(bannerTimer);
+  bannerEndsAt = Date.now() + ms;
+  bannerTimer = setTimeout(endBanner, ms);
+}
+
+function pauseBanner() {
+  if (!banner) return;
+  clearTimeout(bannerTimer);
+  bannerRemaining = Math.max(1500, bannerEndsAt - Date.now());
+}
+
+function endBanner() {
+  clearTimeout(bannerTimer);
+  banner = null;
+  const next = bannerQueue.shift();
+  if (next) {
+    showBanner(next);
+    return;
+  }
+  bannerHover = false;
+  renderBar();
+}
+
+// Clears banners after it was handled (clicked or swiped away).
+function dismissBanner() {
+  if (!banner) return;
+  hoverSuppressed = hovering;
+  bannerHover = false;
+  endBanner();
+}
+
+function bannerIcon(b) {
+  const icon = el('span', 'glyph');
+  if (b.kind === 'media') {
+    if (b.art) {
+      const img = el('img');
+      img.src = b.art;
+      img.alt = '';
+      img.draggable = false;
+      return img;
+    }
+    icon.textContent = '♪';
+  } else if (b.kind === 'battery') {
+    const battery = el('span', `battery${b.charging ? ' charging' : ''}`);
+    const fill = el('b');
+    fill.style.width = `${Math.round((b.level || 0) * 100)}%`;
+    battery.append(fill);
+    return battery;
+  } else if (b.kind === 'timer') icon.textContent = '⏱';
+  else if (b.status === 'done') icon.textContent = '✓';
+  else if (b.status === 'error') icon.textContent = '✕';
+  else icon.textContent = '!';
+  return icon;
+}
+
+function renderBanner() {
+  const show = bannerShown();
+  bannerEl.hidden = !show;
+  if (!show || bannerEl.dataset.id === String(banner.id)) return;
+  bannerEl.dataset.id = String(banner.id);
+  bannerEl.className = `banner kind-${banner.kind}`;
+  setStatusClass(bannerEl, banner.status);
+  if (banner.tag) bannerEl.classList.add('tagged', `tag-${banner.tag}`);
+  bannerParts.icon.replaceChildren(bannerIcon(banner));
+  bannerParts.title.textContent = banner.title;
+  bannerParts.sub.textContent = banner.subtitle || '';
+  bannerParts.sub.title = banner.subtitle || '';
+  const side = [];
+  if (banner.kind === 'media') side.push(makeWave(true));
+  else if (banner.kind === 'battery') side.push(document.createTextNode(`${Math.round((banner.level || 0) * 100)}%`));
+  else if (banner.sessionId) side.push(document.createTextNode('Open ›'));
+  bannerParts.side.replaceChildren(...side);
+  bannerEl.title = banner.sessionId ? 'Click to open the terminal · swipe up to dismiss' : 'Click or swipe up to dismiss';
+}
+
+function bannerAction() {
+  const b = banner;
+  if (!b) return;
+  if (b.sessionId) window.notchApi.focusSession(b.sessionId);
+  dismissBanner();
+}
+
+// ---- Split bubble: the second live activity pops out beside the pill ----
+
+function renderBubble() {
+  const sec =
+    islandStyle && !expanded && !bannerShown() && !dropping && !notch.classList.contains('dot-only') ? plan.secondary : null;
+  island.classList.toggle('split', !!sec);
+  // When it goes away the old content stays for the shrink animation.
+  if (!sec) return;
+  const parts = [];
+  let status = 'idle';
+  let title = '';
+  if (sec.kind === 'session') {
+    const s = sec.session;
+    status = visualStatus(s);
+    const indicator = el('span', 'indicator');
+    indicator.append(el('span', 'core'));
+    parts.push(indicator);
+    title = `${s.name}: ${displayLabel(s)} — click to open its terminal`;
+    if (s.tag) parts.push(el('span', `bubble-tag tag-${s.tag}`));
+  } else if (sec.kind === 'media') {
+    status = 'media';
+    const m = sec.media;
+    if (m.art) {
+      const img = el('img', 'art');
+      img.src = m.art;
+      img.alt = '';
+      img.draggable = false;
+      parts.push(img);
+    } else parts.push(makeWave(true));
+    title = `${[m.title, m.artist].filter(Boolean).join(' — ')} — click to play/pause`;
+  } else if (sec.kind === 'timer') {
+    status = 'timer';
+    const ring = makeRing('ring timer-ring');
+    setRing(ring, window.NotchIsland.timerProgress(sec.timer));
+    parts.push(ring);
+    title = `${sec.timer.mode === 'timer' ? 'Timer' : 'Stopwatch'} ${timerClock(sec.timer)} — click to ${sec.timer.runningSince ? 'pause' : 'resume'}`;
+  }
+  if (plan.more) parts.push(el('span', 'bubble-more', `+${plan.more}`));
+  setStatusClass(bubbleEl, status);
+  bubbleEl.dataset.kind = sec.kind;
+  bubbleEl.dataset.id = sec.id;
+  bubbleBody.replaceChildren(...parts);
+  bubbleBody.title = title;
+}
+
+bubbleBody.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const kind = bubbleEl.dataset.kind;
+  if (kind === 'session') window.notchApi.focusSession(bubbleEl.dataset.id);
+  else if (kind === 'media') window.notchApi.mediaCommand('toggle');
+  else if (kind === 'timer') window.notchApi.timerAction('toggle');
+});
+
+// ---- Squish: the island bounces and its content un-blurs when what it shows changes ----
+
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let lastShapeKey = '';
+
+function squish(strength = 1) {
+  if (!islandStyle || reducedMotion.matches) return;
+  const sx = 1 + 0.04 * strength;
+  const sy = 1 - 0.1 * strength;
+  notch.animate(
+    [
+      { transform: 'scale(1, 1)' },
+      { transform: `scale(${sx}, ${sy})`, offset: 0.28 },
+      { transform: `scale(${1 - 0.015 * strength}, ${1 + 0.04 * strength})`, offset: 0.62 },
+      { transform: 'scale(1, 1)' },
+    ],
+    { duration: 520, easing: 'ease-out' }
+  );
+}
+
+function morphOnChange() {
+  const key = [
+    plan.primary.kind,
+    plan.primary.id,
+    plan.primary.kind === 'session' ? visualStatus(plan.primary.session) : '',
+    bannerShown() ? banner.id : '',
+  ].join('|');
+  if (key === lastShapeKey) return;
+  const first = !lastShapeKey;
+  lastShapeKey = key;
+  if (first || expanded || !islandStyle || reducedMotion.matches) return;
+  squish();
+  const content = bannerShown() ? bannerEl : notch.querySelector('.bar');
+  content.animate(
+    [
+      { filter: 'blur(5px)', opacity: 0.15, transform: 'scale(0.94)' },
+      { filter: 'blur(0)', opacity: 1, transform: 'none' },
+    ],
+    { duration: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+  );
 }
 
 function cardLabel(s) {
@@ -223,7 +584,7 @@ function renderCard(s) {
   const editing = !!renaming && renaming.id === s.id;
   const name = editing ? renaming.input : el('span', 'name', s.name);
   if (!editing) {
-    if (s.originalName) name.title = `Your name for this session. Copilot calls it: ${s.originalName}`;
+    if (s.originalName) name.title = `Your name for this session. ${agentInfo(s.agent).label} calls it: ${s.originalName}`;
     if (s.tag) name.prepend(tagSwatch(s.tag));
     if (s.muted) name.prepend(el('span', 'muted-badge', '🔕 '));
   }
@@ -271,9 +632,14 @@ function renderCard(s) {
   if (todos) card.append(todos);
 
   const info = el('div', 'info');
+  if (s.wsl) {
+    const tag = el('span', 'wsl', 'WSL');
+    tag.title = `Running in WSL (${s.wsl})`;
+    info.append(tag);
+  }
   if (s.cwd) {
     const cwd = el('span', null, `📁 ${shortPath(s.cwd)}`);
-    cwd.title = s.cwd;
+    cwd.title = s.wsl ? `${s.cwd} in ${s.wsl}` : s.cwd;
     info.append(cwd);
   }
   const branch = renderGit(s.git);
@@ -643,7 +1009,7 @@ const FILES_SHOWN = 12;
 function splitPath(p) {
   const parts = String(p).split(/[\\/]/);
   const name = parts.pop() || p;
-  return { name, dir: shortPath(parts.join('\\')) };
+  return { name, dir: shortPath(parts.join(String(p).startsWith('/') ? '/' : '\\')) };
 }
 
 // Files this session created, edited or deleted. Click one to show it in Explorer.
@@ -770,16 +1136,19 @@ function renderUsage(s) {
   const row = el('div', 'usage');
   if (s.model) {
     const model = modelTag(s.model, s.muted ? '' : mascotMood(s.status));
-    model.title = s.cliVersion ? `${s.model} · Copilot CLI v${s.cliVersion}` : s.model;
+    model.title = s.cliVersion ? `${s.model} · ${agentInfo(s.agent).cli} v${s.cliVersion}` : s.model;
     row.append(model);
   }
   if (!u || (!u.premiumRequests && !u.outputTokens && !u.contextLimit)) {
     if (s.cliVersion) row.append(el('span', 'version', `v${s.cliVersion}`));
     return row.childElementCount ? row : null;
   }
-  const premium = el('span', null, `⚡ ${u.premiumRequests}`);
-  premium.title = `${u.premiumRequests} premium requests used by this session`;
-  row.append(premium);
+  // Premium requests are a Copilot billing unit.
+  if (u.premiumRequests || (s.agent || 'copilot') === 'copilot') {
+    const premium = el('span', null, `⚡ ${u.premiumRequests}`);
+    premium.title = `${u.premiumRequests} premium requests used by this session`;
+    row.append(premium);
+  }
   if (u.outputTokens) {
     const out = el('span', null, `${formatTokens(u.outputTokens)} out`);
     out.title = 'Output tokens generated in this session';
@@ -865,7 +1234,9 @@ function renderPanel() {
   countEl.textContent = `${sessions.length} live session${sessions.length === 1 ? '' : 's'}`;
   renderQuota();
   const scrollTop = cards.scrollTop;
-  const live = sessions.length ? sessions.map(renderCard) : [el('div', 'empty-card', 'Start `copilot` in a terminal to see it here.')];
+  const live = sessions.length
+    ? sessions.map(renderCard)
+    : [el('div', 'empty-card', `Start \`${agentInfo(agent).command}\` in a terminal to see it here.`)];
   cards.replaceChildren(...live, ...renderEnded());
   cards.scrollTop = scrollTop;
   if (active && active !== document.body && document.activeElement !== active) {
@@ -887,24 +1258,33 @@ function renderPanel() {
 }
 
 function resize() {
-  const width = expanded
-    ? EXPANDED_WIDTH
-    : notch.classList.contains('dot-only')
-      ? DOT_WIDTH
-      : notch.classList.contains('empty')
-        ? EMPTY_WIDTH
-        : COLLAPSED_WIDTH;
-  const height = expanded ? Math.min(MAX_HEIGHT, BAR_HEIGHT + panel.scrollHeight) : BAR_HEIGHT;
+  const bannerCard = bannerShown();
+  let width = islandStyle ? ISLAND_WIDTH : COLLAPSED_WIDTH;
+  let height = BAR_HEIGHT;
+  if (expanded) {
+    width = EXPANDED_WIDTH;
+    height = Math.min(MAX_HEIGHT, BAR_HEIGHT + panel.scrollHeight);
+  } else if (bannerCard) {
+    width = BANNER_WIDTH;
+    height = BANNER_HEIGHT;
+  } else if (notch.classList.contains('dot-only')) width = DOT_WIDTH;
+  else if (notch.classList.contains('empty')) width = EMPTY_WIDTH;
   notch.style.width = `${width}px`;
   notch.style.height = `${height}px`;
-  notch.style.zoom = String(zoom);
+  island.style.zoom = String(zoom);
   // Approval buttons stay disarmed until the shape has settled (see renderApproval).
   if (width !== lastShape.width || zoom !== lastShape.zoom) layoutChangedAt = Date.now();
   lastShape = { width, zoom };
-  // Report the target bounds (not the animating ones) so hover tracking matches the final shape.
-  const w = width * zoom;
-  const x = align === 'left' ? 0 : align === 'right' ? window.innerWidth - w : (window.innerWidth - w) / 2;
-  window.notchApi.reportRect({ x, y: 0, width: w, height: height * zoom });
+  // Report the target bounds (not the animating ones) so hover tracking matches the final shape:
+  // the pill, plus the split bubble beside it. The island is [shoulder pill shoulder][bubble].
+  const shoulder = islandStyle ? SHOULDER : 0;
+  const split = island.classList.contains('split');
+  const total = (shoulder * 2 + width + (split ? BUBBLE_SHOULDER * 2 + BUBBLE_WIDTH : 0)) * zoom;
+  const left = align === 'left' ? 0 : align === 'right' ? window.innerWidth - total : (window.innerWidth - total) / 2;
+  const extra = split
+    ? [{ x: left + (shoulder * 2 + width + BUBBLE_SHOULDER) * zoom, y: 0, width: BUBBLE_WIDTH * zoom, height: BAR_HEIGHT * zoom }]
+    : [];
+  window.notchApi.reportRect({ x: left + shoulder * zoom, y: 0, width: width * zoom, height: height * zoom, extra });
 }
 
 function render() {
@@ -920,12 +1300,26 @@ function tick() {
   for (const node of notch.querySelectorAll('[data-until]')) node.textContent = formatCountdown(Number(node.dataset.until));
 }
 
+// Timer clocks, progress rings and media positions move several times a second.
+function liveTick() {
+  const now = Date.now();
+  const t = features.timer && extras.timer;
+  if (t) {
+    if (bar.elapsed.dataset.clock === 'timer') bar.elapsed.textContent = timerClock(t, now);
+    if (plan.primary.kind === 'timer' && !bar.ring.hasAttribute('hidden')) setRing(bar.ring, window.NotchIsland.timerProgress(t, now));
+    const bubbleRing = bubbleBody.querySelector('.timer-ring');
+    if (bubbleRing) setRing(bubbleRing, window.NotchIsland.timerProgress(t, now));
+  }
+  if (expanded) liveTickExtras(now);
+}
+
 function expand() {
   clearTimeout(collapseTimer);
+  notch.classList.remove('peek');
   if (expanded) return;
   expanded = true;
   notch.classList.add('expanded');
-  resize();
+  renderBar();
 }
 
 function collapse() {
@@ -934,8 +1328,19 @@ function collapse() {
   collapseTimer = setTimeout(() => {
     expanded = false;
     notch.classList.remove('expanded');
-    resize();
+    renderBar();
   }, COLLAPSE_DELAY_MS);
+}
+
+// Close now (swipe up / click in click-to-open mode), even with the pointer still over it.
+function forceCollapse() {
+  clearTimeout(collapseTimer);
+  if (pinned) window.notchApi.togglePin();
+  hoverSuppressed = hovering;
+  if (!expanded) return;
+  expanded = false;
+  notch.classList.remove('expanded');
+  renderBar();
 }
 
 function setPinned(value) {
@@ -957,10 +1362,36 @@ function flash(kind) {
   flashTimer = setTimeout(() => notch.classList.remove(cls), 1900);
 }
 
-window.notchApi.onHover((value) => {
+window.notchApi.onHover((value, region) => {
   hovering = value;
-  if (value) expand();
-  else collapse();
+  if (!value) {
+    hoverSuppressed = false;
+    notch.classList.remove('peek');
+    if (dropping) endDrop();
+    if (bannerHover) {
+      bannerHover = false;
+      if (banner) startBannerTimer(bannerRemaining || 1500);
+    }
+    collapse();
+    return;
+  }
+  // The split bubble takes clicks (open, play/pause); only the pill itself opens the panel.
+  if (region === 'bubble') {
+    clearTimeout(collapseTimer);
+    notch.classList.remove('peek');
+    return;
+  }
+  // A banner stays (and waits) while the pointer is on it, so it can be clicked.
+  if (bannerShown()) {
+    bannerHover = true;
+    pauseBanner();
+    return;
+  }
+  if (expandOn === 'hover' && !hoverSuppressed) expand();
+  else if (!expanded) {
+    clearTimeout(collapseTimer);
+    notch.classList.add('peek');
+  }
 });
 
 pinButton.addEventListener('click', (e) => {
@@ -970,48 +1401,167 @@ pinButton.addEventListener('click', (e) => {
 window.notchApi.onPinned(setPinned);
 window.notchApi.getPinned().then(setPinned);
 
-// Drag the pill sideways by its top bar; double-click the bar to snap back.
+timerButton.addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.notchApi.timerMenu();
+});
+
+// The running timer in the panel header: click to pause/resume, right-click for the timer menu.
+timerChip.addEventListener('click', (e) => {
+  e.stopPropagation();
+  window.notchApi.timerAction('toggle');
+});
+timerChip.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  window.notchApi.timerMenu();
+});
+
+// Gestures on the pill's top bar:
+//  - drag sideways to move it (double-click to snap back);
+//  - swipe down to open (or pin open), swipe up to close;
+//  - long-press to pin / unpin;
+//  - click to open/close in click-to-open mode;
+//  - scroll to switch which session the pill shows.
 const DRAG_THRESHOLD = 4;
+const SWIPE_THRESHOLD = 10;
 const barEl = notch.querySelector('.bar');
-let drag = null;
+let gesture = null;
 
 barEl.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
-  drag = { startX: e.screenX, moved: false, frame: 0 };
+  gesture = { startX: e.screenX, startY: e.screenY, mode: null, frame: 0, press: setTimeout(longPress, LONG_PRESS_MS) };
   barEl.setPointerCapture(e.pointerId);
   // The main process measures from the cursor position at this moment.
   window.notchApi.drag('start');
 });
 
+function longPress() {
+  if (!gesture || gesture.mode) return;
+  gesture.mode = 'press';
+  window.notchApi.drag('cancel');
+  window.notchApi.togglePin();
+  squish(0.6);
+}
+
 barEl.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  if (!drag.moved) {
-    if (Math.abs(e.screenX - drag.startX) < DRAG_THRESHOLD) return;
-    drag.moved = true;
+  if (!gesture) return;
+  const dx = e.screenX - gesture.startX;
+  const dy = e.screenY - gesture.startY;
+  if (!gesture.mode) {
+    if (Math.abs(dy) >= SWIPE_THRESHOLD && Math.abs(dy) > Math.abs(dx) * 1.5) {
+      gesture.mode = 'swipe';
+      clearTimeout(gesture.press);
+      window.notchApi.drag('cancel');
+      return;
+    }
+    if (Math.abs(dx) < DRAG_THRESHOLD) return;
+    gesture.mode = 'drag';
+    clearTimeout(gesture.press);
     notch.classList.add('dragging');
   }
+  if (gesture.mode !== 'drag') return;
   // Coalesce to one window move per frame.
-  if (!drag.frame) {
-    drag.frame = requestAnimationFrame(() => {
-      if (!drag) return;
-      drag.frame = 0;
+  if (!gesture.frame) {
+    gesture.frame = requestAnimationFrame(() => {
+      if (!gesture) return;
+      gesture.frame = 0;
       window.notchApi.drag('move');
     });
   }
 });
 
-function endDrag() {
-  if (!drag) return;
-  if (drag.frame) cancelAnimationFrame(drag.frame);
-  // A plain click ends with the pill unmoved, so nothing is saved.
-  window.notchApi.drag(drag.moved ? 'end' : 'cancel');
+function endGesture(e) {
+  if (!gesture) return;
+  const g = gesture;
+  gesture = null;
+  clearTimeout(g.press);
+  if (g.frame) cancelAnimationFrame(g.frame);
   notch.classList.remove('dragging');
-  drag = null;
+  if (g.mode === 'drag') {
+    window.notchApi.drag('end');
+    return;
+  }
+  if (g.mode === 'swipe') {
+    if (e.type === 'pointercancel') return;
+    if (e.screenY > g.startY) {
+      // Swipe down: open; when already open, keep it open.
+      if (!expanded) expand();
+      else if (!pinned) window.notchApi.togglePin();
+    } else forceCollapse();
+    return;
+  }
+  if (g.mode === 'press') return;
+  // A plain click ends with the pill unmoved, so nothing is saved.
+  window.notchApi.drag('cancel');
+  if (e.type === 'pointerup' && expandOn === 'click') {
+    if (expanded) forceCollapse();
+    else expand();
+  }
 }
 
-barEl.addEventListener('pointerup', endDrag);
-barEl.addEventListener('pointercancel', endDrag);
+barEl.addEventListener('pointerup', endGesture);
+barEl.addEventListener('pointercancel', endGesture);
 barEl.addEventListener('dblclick', () => window.notchApi.drag('reset'));
+
+let lastWheelAt = 0;
+barEl.addEventListener(
+  'wheel',
+  (e) => {
+    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (!d) return;
+    e.preventDefault();
+    const now = Date.now();
+    if (now - lastWheelAt < 220) return;
+    lastWheelAt = now;
+    cyclePill(d > 0 ? 1 : -1);
+  },
+  { passive: false }
+);
+
+function cyclePill(direction) {
+  const current = plan.primary.kind === 'session' ? plan.primary.id : null;
+  const next = window.NotchIsland.cycleSession(sessions, current, direction);
+  if (!next) return;
+  pickedId = next;
+  clearTimeout(pickTimer);
+  pickTimer = setTimeout(() => {
+    pickedId = null;
+    renderBar();
+  }, PICK_RESET_MS);
+  renderBar();
+  const card = [...cards.querySelectorAll('.card')].find((c) => c.dataset.id === next);
+  if (card && expanded) {
+    card.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+    card.classList.remove('featured');
+    void card.offsetWidth;
+    card.classList.add('featured');
+  }
+}
+
+// Banner: click to act (open the session's terminal), swipe or scroll up to dismiss.
+let bannerPress = null;
+bannerEl.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  bannerPress = { y: e.screenY };
+  bannerEl.setPointerCapture(e.pointerId);
+});
+bannerEl.addEventListener('pointerup', (e) => {
+  if (!bannerPress) return;
+  const dy = e.screenY - bannerPress.y;
+  bannerPress = null;
+  if (dy < -SWIPE_THRESHOLD) dismissBanner();
+  else if (Math.abs(dy) < SWIPE_THRESHOLD) bannerAction();
+});
+bannerEl.addEventListener('pointercancel', () => (bannerPress = null));
+bannerEl.addEventListener(
+  'wheel',
+  (e) => {
+    e.preventDefault();
+    if (e.deltaY < 0) dismissBanner();
+  },
+  { passive: false }
+);
 
 notch.addEventListener('contextmenu', (e) => {
   e.preventDefault();
@@ -1026,6 +1576,7 @@ window.notchApi.onUpdate((next) => {
   pruneApprovalBoxes();
   // The session being renamed ended: nothing to rename any more.
   if (renaming && !sessions.some((s) => s.id === renaming.id)) finishRename(false);
+  if (pickedId && !sessions.some((s) => s.id === pickedId)) pickedId = null;
   render();
   const waiting = sessions.some((s) => (s.pendingApproval || s.pendingQuestion) && !s.muted);
   if (waiting && !heldOpen) {
@@ -1038,23 +1589,14 @@ window.notchApi.onUpdate((next) => {
 });
 
 window.notchApi.onTransition((t) => {
-  if (t.kind === 'done' || t.kind === 'error') {
-    flash(t.kind);
-    // Show the toast unless another session needs attention.
-    const top = sessions[0];
-    if (!top || top.id === t.session.id || (top.status !== 'approval' && top.status !== 'input')) {
-      toast = t;
-      clearTimeout(toastTimer);
-      toastTimer = setTimeout(() => {
-        toast = null;
-        renderBar();
-      }, TOAST_MS);
-      renderBar();
-    }
-  } else if (t.kind === 'attention') {
-    toast = null;
-    renderBar();
+  if (t.kind === 'done' || t.kind === 'error') flash(t.kind);
+  if (t.kind === 'attention' && banner && banner.kind !== 'attention' && !cardBanners()) {
+    // The pill shows the request itself; a "Done" toast must not cover it.
+    bannerQueue = [];
+    endBanner();
+    return;
   }
+  pushBanner(window.NotchIsland.bannerForTransition(t, sessions[0]));
 });
 
 // Screen reader announcements. The main process sends these to one notch window only, so a
@@ -1110,7 +1652,7 @@ window.notchApi.onKeyboard((active) => {
     pendingFocus = null;
     const first = cards.querySelector('[role="listitem"]');
     (first || pinButton).focus();
-    announce(`Copilot sessions. ${sessions.length} live. Use arrow keys to move, Enter to open a terminal, Escape to close.`, false);
+    announce(`${agentInfo(agent).label} sessions. ${sessions.length} live. Use arrow keys to move, Enter to open a terminal, Escape to close.`, false);
   }
 });
 
@@ -1152,7 +1694,8 @@ function chime(kind) {
   lastChimeAt = Date.now();
   try {
     audioCtx = audioCtx || new AudioContext();
-    const notes = kind === 'done' ? [660, 880] : kind && kind.startsWith('stuck') ? [440, 330] : [880, 1175];
+    const notes =
+      kind === 'done' ? [660, 880] : kind === 'timer' ? [988, 784, 988, 784] : kind && kind.startsWith('stuck') ? [440, 330] : [880, 1175];
     const start = audioCtx.currentTime + 0.01;
     notes.forEach((freq, i) => {
       const osc = audioCtx.createOscillator();
@@ -1183,11 +1726,27 @@ function applySize(values) {
   zoom = SIZE_ZOOM[values && values.size] || 1;
   compact = !!(values && values.compactWhenIdle);
   align = (values && values.position) || 'center';
+  const nextAgent = (values && values.agent) || 'copilot';
+  const agentChanged = nextAgent !== agent;
+  agent = nextAgent;
+  notch.setAttribute('aria-label', `${agentInfo(agent).cli} sessions`);
   const root = document.documentElement;
   root.dataset.theme = (values && values.theme) || 'dark';
   root.style.setProperty('--bg-alpha', String(((values && values.opacity) || 100) / 100));
   document.body.dataset.align = align;
+  const wasIsland = islandStyle;
+  islandStyle = !values || values.islandStyle !== false;
+  bannersOn = !values || values.islandBanners !== false;
+  expandOn = (values && values.expandOn) || 'hover';
+  features.media = !values || values.mediaControls !== false;
+  features.shelf = !values || values.shelf !== false;
+  features.battery = !values || values.batteryAlerts !== false;
+  features.timer = !values || values.quickTimer !== false;
+  document.body.classList.toggle('island-style', islandStyle);
+  if (wasIsland !== islandStyle) lastShapeKey = '';
   renderBar();
+  renderExtras();
+  if (agentChanged) renderPanel();
 }
 
 window.notchApi.onEnded((list) => {
@@ -1203,3 +1762,5 @@ window.notchApi.onSettings(applySize);
 window.notchApi.getSettings().then(applySize);
 window.addEventListener('resize', resize);
 setInterval(tick, 1000);
+setInterval(liveTick, 250);
+initExtras();

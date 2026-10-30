@@ -15,6 +15,12 @@ test('full-screen monitor lines are parsed defensively', () => {
   assert.equal(parseLine('garbage'), null);
 });
 
+test('WSL terminal counts from the monitor are parsed', () => {
+  assert.deepEqual(parseLine('{"wslClients":{"Ubuntu-22.04":2,"bad name":1,"Debian":0}}'), { wslClients: { 'Ubuntu-22.04': 2 } });
+  assert.deepEqual(parseLine('{"wslClients":{}}'), { wslClients: {} });
+  assert.deepEqual(parseLine('{"wslClients":3}'), { wslClients: {} });
+});
+
 test('presentation mode and quiet time count as quiet', () => {
   assert.equal(isQuiet({ quns: QUNS.PRESENTATION }), true);
   assert.equal(isQuiet({ quns: QUNS.QUIET_TIME }), true);

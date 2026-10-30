@@ -10,6 +10,24 @@
     <h1>Notch Picker</h1>
     <form id="form">
       <section>
+        <h2>Agent</h2>
+        <label class="number">
+          <span><b>Coding agent</b><small>Whose sessions the notch and pets follow.</small></span>
+          <select name="agent">
+            <option value="copilot">GitHub Copilot CLI</option>
+            <option value="claude">Claude Code</option>
+            <option value="codex">Codex CLI</option>
+            <option value="gemini">Gemini CLI</option>
+          </select>
+        </label>
+        <p class="agent-note"><small id="agent-note"></small></p>
+        <label class="toggle" id="wsl-toggle">
+          <span><b>Include WSL sessions</b><small>Copilot CLI sessions running inside WSL distros (~/.copilot in each Linux home).</small></span>
+          <input type="checkbox" name="wslSessions" />
+        </label>
+      </section>
+
+      <section>
         <h2>Appearance</h2>
         <label class="number">
           <span><b>Size</b><small>Scales the whole notch.</small></span>
@@ -66,6 +84,62 @@
           </span>
           <input type="text" name="hotkey" spellcheck="false" autocomplete="off" />
         </label>
+      </section>
+
+      <section>
+        <h2>Dynamic Island</h2>
+        <label class="toggle">
+          <span>
+            <b>Dynamic Island style</b>
+            <small>Concave edges, a second bubble for another live activity, springy squish animations, a progress ring and waveform. Off keeps the classic flat pill.</small>
+          </span>
+          <input type="checkbox" name="islandStyle" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>Event banners</b>
+            <small>The pill grows into a short card when a session finishes, fails or needs you, a timer ends, charging starts or the song changes. Click it to open the session; swipe up to dismiss.</small>
+          </span>
+          <input type="checkbox" name="islandBanners" />
+        </label>
+        <label class="number">
+          <span><b>Open the panel on</b><small>With click, hovering only peeks.</small></span>
+          <select name="expandOn">
+            <option value="hover">Hover</option>
+            <option value="click">Click</option>
+          </select>
+        </label>
+        <label class="toggle" id="media-toggle">
+          <span>
+            <b>Now playing</b>
+            <small>Music and videos playing in any app (Spotify, browsers, Media Player…) with play/pause and skip.</small>
+          </span>
+          <input type="checkbox" name="mediaControls" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>File shelf</b>
+            <small>Drop files on the notch to keep them handy, then drag them out into any app.</small>
+          </span>
+          <input type="checkbox" name="shelf" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>Quick timer</b>
+            <small>Timer and stopwatch from the ⏱ button in the panel or the notch menu.</small>
+          </span>
+          <input type="checkbox" name="quickTimer" />
+        </label>
+        <label class="toggle">
+          <span>
+            <b>Battery banners</b>
+            <small>When charging starts, and when the battery drops to 20%, 10% and 5%.</small>
+          </span>
+          <input type="checkbox" name="batteryAlerts" />
+        </label>
+        <p class="hint">
+          Gestures: scroll on the pill to switch sessions · swipe down to open, up to close · long-press to pin · drag sideways to move.
+        </p>
       </section>
 
       <section>
@@ -132,7 +206,7 @@
         </label>
       </section>
 
-      <section>
+      <section id="approve-section">
         <h2>Approve &amp; answer from the notch (beta)</h2>
         <label class="toggle">
           <span>

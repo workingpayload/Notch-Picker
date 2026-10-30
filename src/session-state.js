@@ -199,6 +199,10 @@ function describeTool(name, args) {
       return truncate(a.skill);
     case 'sql':
       return truncate(a.description);
+    case 'apply_patch': {
+      const first = editTargets('apply_patch', args)[0];
+      return first ? basename(first.path) : '';
+    }
     default:
       return truncate(a.description || a.intent || a.query || a.path || '');
   }

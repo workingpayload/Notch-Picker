@@ -157,7 +157,7 @@ function renderSessions(list, force = false) {
     sessionsEl.append(row);
   }
   sessionsNote.textContent = !list.length
-    ? 'No live Copilot sessions.'
+    ? 'No live sessions.'
     : values.petMode !== 'perSession'
       ? 'These apply with “One pet per session” (Pets, above).'
       : 'New sessions take the next species in turn; pick one to keep it for that session.';

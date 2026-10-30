@@ -19,8 +19,9 @@ class IdleTracker {
     this.delayMs = delayMs;
   }
 
-  update(sessions, now) {
-    if (sessions.some(isActive)) this.lastActiveAt = now;
+  // `busy`: something besides sessions is live in the notch (playing media, a running timer).
+  update(sessions, now, busy = false) {
+    if (busy || sessions.some(isActive)) this.lastActiveAt = now;
     return now - this.lastActiveAt >= this.delayMs;
   }
 }
@@ -36,8 +37,9 @@ function shouldShow({ pinned, userHidden, displayHidden, idleHidden, hovering })
 }
 
 // Collapsed pill shows only a status dot when compact mode is on and nothing needs attention.
-function isDotOnly({ compact, top, toast }) {
-  if (!compact || toast) return false;
+// `busy`: the pill is showing something else live (media, timer).
+function isDotOnly({ compact, top, toast, busy = false }) {
+  if (!compact || toast || busy) return false;
   if (!top || top.muted) return true;
   return top.status === 'idle';
 }

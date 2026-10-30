@@ -15,6 +15,7 @@ function parseLine(line) {
   try {
     const v = JSON.parse(line);
     if (Array.isArray(v.windows)) return { windows: parseWindows(v.windows) };
+    if ('wslClients' in v) return { wslClients: parseWslClients(v.wslClients) };
     const r = v.fullscreen;
     const rect = r && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
     return {
@@ -35,13 +36,20 @@ function parseWindows(list) {
     .map(([id, l, t, r, b, cover]) => ({ id, x: l, y: t, width: r - l, height: b - t, cover: cover === 1 }));
 }
 
+// {"Ubuntu": 2, ...}: open WSL terminals per distro.
+function parseWslClients(map) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+  return Object.fromEntries(Object.entries(map).filter(([name, n]) => /^[\w.-]{1,64}$/.test(name) && Number.isSafeInteger(n) && n > 0));
+}
+
 // Presentation mode and Focus Assist / quiet hours mean "don't make noise".
 function isQuiet(state) {
   return state.quns === QUNS.PRESENTATION || state.quns === QUNS.QUIET_TIME;
 }
 
 // Runs fullscreen-monitor.ps1 and emits 'change' with { quns, fullscreen } (fullscreen = physical
-// monitor rect), and, while window tracking is on, 'windows' with the visible app windows.
+// monitor rect), while window tracking is on, 'windows' with the visible app windows, and while
+// WSL tracking is on, 'wsl' with the open WSL terminals per distro (null when unknown).
 class FullscreenMonitor extends EventEmitter {
   constructor({ log = () => {} } = {}) {
     super();
@@ -52,6 +60,7 @@ class FullscreenMonitor extends EventEmitter {
     this.quickRestarts = 0;
     this.restartTimer = null;
     this.trackWindows = false;
+    this.trackWsl = false;
   }
 
   start() {
@@ -72,15 +81,22 @@ class FullscreenMonitor extends EventEmitter {
         this.emit('windows', next.windows);
         return;
       }
+      if ('wslClients' in next) {
+        this.emit('wsl', next.wslClients);
+        return;
+      }
       this.state = next;
       this.emit('change', next);
     });
     if (this.trackWindows) child.stdin.write('windows on\n');
+    if (this.trackWsl) child.stdin.write('wsl on\n');
     let stderr = '';
     child.stderr.on('data', (d) => (stderr = (stderr + d).slice(-500)));
     child.on('error', (e) => this.log(`Full-screen monitor failed to start: ${e.message}`));
     child.on('exit', (code) => {
       this.child = null;
+      // A stale count would keep WSL distros awake; it's resent once the helper restarts.
+      if (this.trackWsl) this.emit('wsl', null);
       if (this.stopped) return;
       this.quickRestarts = Date.now() - startedAt < 30000 ? this.quickRestarts + 1 : 0;
       if (this.quickRestarts > MAX_QUICK_RESTARTS) {
@@ -104,6 +120,14 @@ class FullscreenMonitor extends EventEmitter {
     this.trackWindows = on;
     if (this.child) this.child.stdin.write(on ? 'windows on\n' : 'windows off\n');
     if (!on) this.emit('windows', []);
+  }
+
+  // Turns reporting of open WSL terminals on or off ('wsl' events; null when off).
+  setWslTracking(on) {
+    if (on === this.trackWsl) return;
+    this.trackWsl = on;
+    if (this.child) this.child.stdin.write(on ? 'wsl on\n' : 'wsl off\n');
+    if (!on) this.emit('wsl', null);
   }
 
   stop() {

@@ -5,14 +5,17 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, shell } = require('electron');
 const { SessionWatcher, copilotHome, compareSessions } = require('./watcher');
+const { WslLocator, vscodeWslUrl } = require('./wsl');
+const { AgentSessionWatcher, agentLogFolder } = require('./agent-watcher');
+const { AGENT_IDS, agentLabel, resumeCommand } = require('./agents');
 const { Settings } = require('./settings');
 const { AlertTracker, stuckKind, describeAlert } = require('./alerts');
 const { createLogger } = require('./logger');
-const { focusTerminal, findTerminalWindow } = require('./focus');
+const { focusTerminal, focusWslTerminal, findTerminalWindow } = require('./focus');
 const { ApprovalServer, hookConfig, installHook, uninstallHook } = require('./approval');
 const { UsageCollector, aggregate } = require('./usage-stats');
 const { shouldSend, buildPayload, sendWebhook } = require('./webhooks');
-const { NotchManager } = require('./notches');
+const { NotchManager, sanitizeRect } = require('./notches');
 const { FullscreenMonitor, isQuiet, QUNS } = require('./fullscreen');
 const { GitInfo } = require('./git-info');
 const { renderTrayIcon } = require('./tray-icon');
@@ -20,6 +23,10 @@ const { IdleTracker } = require('./visibility');
 const { Updater, describeUpdate } = require('./updater');
 const { LABEL_COLORS, updateLabel, applyLabel, cleanName } = require('./labels');
 const { PetManager } = require('./pet-window');
+const { MediaMonitor } = require('./media');
+const { QuickTimer, describeDuration, TIMER_PRESETS_MIN } = require('./timer');
+const { Shelf, isOpenable } = require('./shelf');
+const { mediaPlaying } = require('./island');
 
 // The original app ID (from when the app was Copilot Notch); see setAppUserModelId below.
 const APP_ID = 'com.copilot.notch';
@@ -53,6 +60,18 @@ const alerts = new AlertTracker();
 const git = new GitInfo();
 const idle = new IdleTracker();
 const liveNotifications = new Set();
+// Island extras: now playing, quick timer, file shelf (icons are looked up once per file).
+let media = null;
+let shelf = null;
+let lastExtras = '';
+const quickTimer = new QuickTimer();
+const shelfIcons = new Map(); // path -> nativeImage (empty when Windows has none)
+// Finds Copilot CLI sessions inside WSL distros (Windows only).
+const wsl = new WslLocator({ log: (m) => log(m) });
+
+function followsWsl(values) {
+  return values.agent === 'copilot' && values.wslSessions && wsl.supported;
+}
 
 // Keep settings/logs in one place for both `npm start` and the installed app (whose product
 // name differs). Tests and side-by-side runs can still override with --user-data-dir.
@@ -139,13 +158,19 @@ function fullscreenDisplayIds() {
 }
 
 function applySettings(values) {
+  const wslChanged = !!(watcher && watcher.wsl) !== followsWsl(values);
+  if (watcher && (values.agent !== watcher.agent || wslChanged)) startWatcher(values.agent);
   notches.applySettings(values);
   notches.setHiddenDisplays(fullscreenDisplayIds());
   pet.sync();
   pet.setHiddenDisplays(fullscreenDisplayIds());
   if (fullscreen) fullscreen.setWindowTracking(values.pet && values.petRoam);
+  if (fullscreen) fullscreen.setWslTracking(followsWsl(values));
   registerHotkey(values.hotkey);
   syncApprovals(values);
+  syncMedia(values);
+  if (!values.quickTimer) quickTimer.stop();
+  sendExtras(true);
   if (updater) updater.configure({ feedUrl: values.updateFeedUrl, auto: values.autoUpdate });
   send('sessions:ended', endedWithLabels());
   notches.broadcast('settings:changed', values);
@@ -295,6 +320,15 @@ function buildMenu() {
     { label: `Notch Picker — ${latest.length} live session${latest.length === 1 ? '' : 's'}`, enabled: false },
     { type: 'separator' },
     {
+      label: `Agent: ${agentLabel(values.agent)}`,
+      submenu: AGENT_IDS.map((id) => ({
+        label: agentLabel(id),
+        type: 'radio',
+        checked: values.agent === id,
+        click: () => settings.set({ agent: id }),
+      })),
+    },
+    {
       label: 'Show notch',
       type: 'checkbox',
       checked: notches.isShown(),
@@ -307,6 +341,13 @@ function buildMenu() {
       accelerator: hotkeyLabel() || undefined,
       registerAccelerator: false,
       click: (item) => togglePin(item.checked),
+    },
+    ...(values.quickTimer ? [{ label: timerMenuLabel(), submenu: timerMenuItems() }] : []),
+    {
+      label: 'Dynamic Island style',
+      type: 'checkbox',
+      checked: values.islandStyle,
+      click: (item) => settings.set({ islandStyle: item.checked }),
     },
     {
       label: 'Compact when idle',
@@ -418,7 +459,7 @@ function buildMenu() {
       checked: process.platform !== 'linux' && isLaunchAtLogin(),
       click: (item) => setLaunchAtLogin(item.checked),
     },
-    { label: 'Open session-state folder', click: () => shell.openPath(path.join(copilotHome(), 'session-state')) },
+    { label: 'Open sessions folder', click: () => shell.openPath(agentLogFolder(values.agent, path.join(copilotHome(), 'session-state'))) },
     { label: 'Open log', click: () => shell.openPath(logFile()) },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
@@ -459,7 +500,7 @@ function updateTray(sessions) {
     tray.setImage(trayImage(status, waiting > 0));
   }
   const tip = top
-    ? `Copilot: ${top.label} — ${top.name}${waiting ? ` (${waiting} waiting for you)` : ''}`
+    ? `${agentLabel(settings.get().agent)}: ${top.label} — ${top.name}${waiting ? ` (${waiting} waiting for you)` : ''}`
     : sessions.length
       ? `Notch Picker — ${sessions.length} muted session${sessions.length === 1 ? '' : 's'}`
       : 'Notch Picker — no live sessions';
@@ -607,25 +648,41 @@ function send(channel, payload) {
 async function focusSession(id) {
   const session = latest.find((s) => s.id === id);
   if (!session) return { ok: false, detail: 'session not found' };
-  const result = await focusTerminal(session.pid);
-  if (!result.ok) log(`Could not focus terminal for session ${id} (pid ${session.pid}): ${result.detail}`);
+  const result = session.wsl ? await focusWslSession(session) : await focusTerminal(session.pid);
+  if (!result.ok) {
+    const where = session.wsl ? ` in WSL ${session.wsl}` : '';
+    log(`Could not focus terminal for session ${id} (pid ${session.pid}${where}): ${result.detail}`);
+  }
   return result;
 }
 
-function vscodeUrl(dir) {
-  return `vscode://file/${encodeURI(dir.replace(/\\/g, '/'))}`;
+// A WSL session's Linux PID has no Windows window, so look for the windows connected to its distro.
+async function focusWslSession(session) {
+  const hint = await wsl.terminalHint(session.wsl, session.pid);
+  return focusWslTerminal({ distro: session.wsl, folder: path.posix.basename(session.cwd || ''), vscode: hint.vscode });
+}
+
+// A session's folder as a Windows path (WSL sessions report Linux paths: use the WSL share).
+function sessionFolder(s) {
+  if (!s || !s.cwd) return null;
+  return s.wsl ? wsl.windowsPath(s.wsl, s.cwd) : s.cwd;
+}
+
+function vscodeUrl(s) {
+  if (s.wsl) return vscodeWslUrl(s.wsl, s.cwd);
+  return `vscode://file/${encodeURI(s.cwd.replace(/\\/g, '/'))}`;
 }
 
 function buildSessionMenu(session, window) {
-  const hasCwd = !!session.cwd;
+  const hasCwd = !!sessionFolder(session);
   const label = settings.get().sessionLabels[session.id] || {};
   const colorName = (c) => c[0].toUpperCase() + c.slice(1);
   return Menu.buildFromTemplate([
     { label: session.originalName ? `${session.name} (${session.originalName})` : session.name, enabled: false },
     { type: 'separator' },
-    { label: 'Open terminal', click: () => focusSession(session.id) },
-    { label: 'Open folder', enabled: hasCwd, click: () => shell.openPath(session.cwd) },
-    { label: 'Open folder in VS Code', enabled: hasCwd, click: () => shell.openExternal(vscodeUrl(session.cwd)) },
+    { label: 'Open terminal', enabled: !!session.pid, click: () => focusSession(session.id) },
+    { label: 'Open folder', enabled: hasCwd, click: () => shell.openPath(sessionFolder(session)) },
+    { label: 'Open folder in VS Code', enabled: hasCwd, click: () => shell.openExternal(vscodeUrl(session)) },
     { type: 'separator' },
     { label: 'Rename…', click: () => startRename(session.id, window) },
     ...(label.name ? [{ label: 'Reset name', click: () => setLabel(session.id, { name: '' }) }] : []),
@@ -648,10 +705,20 @@ function buildSessionMenu(session, window) {
       ? { label: 'Unmute session', click: () => setMuted(session.id, false) }
       : { label: 'Mute session', toolTip: 'No alerts, sounds or pill takeover from this session', click: () => setMuted(session.id, true) },
     { type: 'separator' },
-    { label: 'Copy resume command', click: () => clipboard.writeText(`copilot --resume ${session.id}`) },
+    { label: 'Copy resume command', click: () => clipboard.writeText(resumeCommand(session.agent, session.id)) },
     { label: 'Copy session ID', click: () => clipboard.writeText(session.id) },
-    { label: 'Open session-state folder', click: () => shell.openPath(path.join(copilotHome(), 'session-state', session.id)) },
+    sessionLogItem(session.id, session.agent),
   ]);
+}
+
+// Reveals a session's log: Copilot's session-state folder, or the other agents' log file.
+function sessionLogItem(id, agent) {
+  if (!agent || agent === 'copilot') {
+    const dir = (watcher && watcher.sessionDir && watcher.sessionDir(id)) || path.join(copilotHome(), 'session-state', id);
+    return { label: 'Open session-state folder', click: () => shell.openPath(dir) };
+  }
+  const file = watcher && watcher.logFile ? watcher.logFile(id) : null;
+  return { label: 'Show session log', enabled: !!file, click: () => shell.showItemInFolder(file) };
 }
 
 // Windows only closes a popup menu on an outside click when its owner window is in the
@@ -804,14 +871,14 @@ function startRename(id, window) {
 function showEndedMenu(id, window) {
   const e = endedWithLabels().find((s) => s.id === id);
   if (!e || !window) return;
-  const hasCwd = !!e.cwd;
+  const hasCwd = !!sessionFolder(e);
   const menu = Menu.buildFromTemplate([
     { label: e.name, enabled: false },
     { type: 'separator' },
-    { label: 'Copy resume command', click: () => clipboard.writeText(`copilot --resume ${e.id}`) },
-    { label: 'Open folder', enabled: hasCwd, click: () => shell.openPath(e.cwd) },
-    { label: 'Open folder in VS Code', enabled: hasCwd, click: () => shell.openExternal(vscodeUrl(e.cwd)) },
-    { label: 'Open session-state folder', click: () => shell.openPath(path.join(copilotHome(), 'session-state', e.id)) },
+    { label: 'Copy resume command', click: () => clipboard.writeText(resumeCommand(e.agent, e.id)) },
+    { label: 'Open folder', enabled: hasCwd, click: () => shell.openPath(sessionFolder(e)) },
+    { label: 'Open folder in VS Code', enabled: hasCwd, click: () => shell.openExternal(vscodeUrl(e)) },
+    sessionLogItem(e.id, e.agent),
     { type: 'separator' },
     { label: 'Remove from list', click: () => watcher.dismissEnded(e.id) },
     { label: 'Clear all ended sessions', click: () => watcher.clearEnded() },
@@ -871,6 +938,138 @@ function withPendingApprovals(sessions) {
     .sort(compareSessions);
 }
 
+// ---- Island extras: now playing, quick timer, file shelf ----
+
+function extrasState() {
+  const values = settings.get();
+  return {
+    media: values.mediaControls && media ? media.state : null,
+    timer: values.quickTimer ? quickTimer.snapshot() : null,
+    shelf:
+      values.shelf && shelf
+        ? shelf.list().map((item) => {
+            const icon = shelfIcons.get(item.path);
+            return { ...item, icon: icon && !icon.isEmpty() ? icon.toDataURL() : null };
+          })
+        : [],
+  };
+}
+
+function sendExtras(force = false) {
+  if (!notches) return;
+  const state = extrasState();
+  const json = JSON.stringify(state);
+  if (!force && json === lastExtras) return;
+  lastExtras = json;
+  send('extras:update', state);
+}
+
+// Something besides sessions keeps the notch busy (for auto-hide when idle).
+function extrasBusy() {
+  const values = settings.get();
+  return (values.mediaControls && !!media && mediaPlaying(media.state)) || (values.quickTimer && !!quickTimer.snapshot());
+}
+
+// The media helper only runs while "Now playing" is on (Windows).
+function syncMedia(values) {
+  if (values.mediaControls && process.platform === 'win32') {
+    if (!media) {
+      media = new MediaMonitor({ log });
+      media.on('change', () => sendExtras());
+    }
+    media.start();
+  } else if (media) {
+    media.stop();
+  }
+}
+
+async function loadShelfIcons() {
+  if (!shelf) return;
+  const items = shelf.list();
+  const paths = new Set(items.map((i) => i.path));
+  for (const p of shelfIcons.keys()) if (!paths.has(p)) shelfIcons.delete(p);
+  let added = false;
+  for (const item of items) {
+    if (shelfIcons.has(item.path)) continue;
+    try {
+      shelfIcons.set(item.path, await app.getFileIcon(item.path, { size: 'normal' }));
+    } catch {
+      shelfIcons.set(item.path, nativeImage.createEmpty());
+    }
+    added = true;
+  }
+  if (added) sendExtras();
+}
+
+// Opening a shelf item never runs a program: only folders and known document/media types are
+// opened; anything else is shown in its folder.
+function openShelfItem(p) {
+  const item = shelf && shelf.list().find((i) => i.path === p);
+  if (!item) return;
+  if (!item.dir && !isOpenable(p)) {
+    shell.showItemInFolder(p);
+    return;
+  }
+  shell.openPath(p).then((err) => err && log(`Could not open shelf item: ${err}`));
+}
+
+function showShelfMenu(p, window) {
+  if (!shelf || !shelf.has(p)) return;
+  popupMenu(
+    Menu.buildFromTemplate([
+      { label: path.basename(p) || p, enabled: false },
+      { type: 'separator' },
+      { label: 'Open', click: () => openShelfItem(p) },
+      { label: 'Show in folder', click: () => shell.showItemInFolder(p) },
+      { label: 'Copy path', click: () => clipboard.writeText(p) },
+      { type: 'separator' },
+      { label: 'Remove from shelf', click: () => shelf.remove(p) },
+      { label: 'Clear shelf', click: () => shelf.clear() },
+    ]),
+    window
+  );
+}
+
+function timerMenuLabel() {
+  const t = quickTimer.snapshot();
+  if (!t) return 'Timer';
+  return t.mode === 'timer' ? `Timer (${describeDuration(t.durationMs)}${t.runningSince ? '' : ', paused'})` : `Stopwatch${t.runningSince ? '' : ' (paused)'}`;
+}
+
+function timerMenuItems() {
+  const t = quickTimer.snapshot();
+  const items = TIMER_PRESETS_MIN.map((m) => ({
+    label: m === 25 ? '25 minutes (focus)' : m === 60 ? '1 hour' : `${m} minute${m === 1 ? '' : 's'}`,
+    click: () => quickTimer.start(m * 60000),
+  }));
+  items.push({ label: 'Stopwatch', click: () => quickTimer.startStopwatch() });
+  if (t) {
+    items.push(
+      { type: 'separator' },
+      { label: t.runningSince ? 'Pause' : 'Resume', click: () => quickTimer.toggle() },
+      ...(t.mode === 'timer' ? [{ label: 'Add 1 minute', click: () => quickTimer.add(60000) }] : []),
+      { label: t.mode === 'timer' ? 'Cancel timer' : 'Stop stopwatch', click: () => quickTimer.stop() }
+    );
+  }
+  return items;
+}
+
+function onTimerDone({ mode, durationMs }) {
+  send('extras:event', { kind: 'timer-done', mode, durationMs });
+  const values = settings.get();
+  const quiet = values.muteInFocusAssist && fullscreen && isQuiet(fullscreen.state);
+  if (values.sound && !quiet) {
+    const w = notches.primaryWindow();
+    if (w) w.webContents.send('notch:chime', 'timer');
+  }
+  if (!values.notifications || !Notification.isSupported()) return;
+  const n = new Notification({ title: 'Timer finished', body: `Your ${describeDuration(durationMs)} timer is up.`, silent: true });
+  liveNotifications.add(n);
+  n.on('close', () => liveNotifications.delete(n));
+  n.on('click', () => liveNotifications.delete(n));
+  n.show();
+}
+
 function refresh(force = false) {
   const now = Date.now();
   const values = settings.get();
@@ -880,7 +1079,8 @@ function refresh(force = false) {
     ...s,
     stuck: stuckKind(s, now, values),
     muted: muted.has(s.id),
-    git: git.get(s.cwd, now),
+    // Running git in a distro that may have just been shut down would start it again.
+    git: s.wsl && !wsl.canRead(s.wsl) ? git.peek(sessionFolder(s)) : git.get(sessionFolder(s), now),
   }));
   // Muted sessions never take the pill; Array.prototype.sort is stable so priority order is kept.
   decorated.sort((a, b) => Number(a.muted) - Number(b.muted));
@@ -894,7 +1094,7 @@ function refresh(force = false) {
     updateTray(decorated);
   }
   for (const alert of alerts.update(effective.filter((s) => !muted.has(s.id)), now, values)) notify(alert);
-  const idleNow = idle.update(decorated, now);
+  const idleNow = idle.update(decorated, now, extrasBusy());
   notches.setIdleHidden(values.autoHideWhenIdle && idleNow);
 }
 
@@ -922,7 +1122,8 @@ async function routePermission(input, type = 'permission') {
   const values = settings.get();
   if (!(type === 'question' ? values.answerFromNotch : values.approveFromNotch)) return false;
   const session = latest.find((s) => s.id === input.sessionId);
-  if (!session || isMuted(session.id)) return false;
+  // The hook is only installed for Windows' Copilot CLI; a WSL session never asks the notch.
+  if (!session || session.wsl || isMuted(session.id)) return false;
   if (values.approvalOnlyWhenAway && (await userAtTerminal(session))) return false;
   return true;
 }
@@ -942,10 +1143,12 @@ async function returnRequestsToTerminal(foreground) {
 }
 
 // Starts/stops the local endpoint and installs/removes the Copilot CLI hook to match the
-// settings. The hook only exists while one of the features is on.
+// settings. The hook only exists while one of the features is on and Copilot is the agent.
 async function syncApprovals(values) {
   const hooksDir = path.join(copilotHome(), 'hooks');
-  if (values.approveFromNotch || values.answerFromNotch) {
+  const approve = values.agent === 'copilot' && values.approveFromNotch;
+  const answer = values.agent === 'copilot' && values.answerFromNotch;
+  if (approve || answer) {
     if (!approvals) {
       approvals = new ApprovalServer({
         endpointFile: endpointFile(),
@@ -972,8 +1175,8 @@ async function syncApprovals(values) {
           execPath: process.execPath,
           scriptPath: hookScriptPath(),
           endpointFile: endpointFile(),
-          permissions: values.approveFromNotch,
-          questions: values.answerFromNotch,
+          permissions: approve,
+          questions: answer,
         })
       );
     } catch (e) {
@@ -981,7 +1184,7 @@ async function syncApprovals(values) {
     }
     // Requests of a type that was just switched off go back to the terminal.
     for (const r of approvals.list()) {
-      if (!(r.type === 'question' ? values.answerFromNotch : values.approveFromNotch)) approvals.decide(r.id, 'terminal');
+      if (!(r.type === 'question' ? answer : approve)) approvals.decide(r.id, 'terminal');
     }
   } else {
     try {
@@ -1013,7 +1216,7 @@ function registerIpc() {
   ipcMain.handle('settings:get', () => settings.get());
   ipcMain.handle('settings:set', (_e, patch) => settings.set(patch));
   ipcMain.handle('settings:test-notification', () => {
-    const sample = latest[0] || { id: '', name: 'Sample session', status: 'approval', label: 'Approve shell', detail: 'npm run deploy' };
+    const sample = latest[0] || { id: '', agent: settings.get().agent, name: 'Sample session', status: 'approval', label: 'Approve shell', detail: 'npm run deploy' };
     notify({ kind: 'attention', session: { ...sample, status: 'approval', detail: sample.detail || 'Test notification' } }, { webhook: false });
     return true;
   });
@@ -1021,7 +1224,7 @@ function registerIpc() {
     const values = settings.get();
     if (!values.webhookUrl) return { ok: false, detail: 'Set an https webhook URL first' };
     try {
-      const sample = latest[0] || { id: 'sample', name: 'Sample session', status: 'idle', label: 'Idle' };
+      const sample = latest[0] || { id: 'sample', agent: settings.get().agent, name: 'Sample session', status: 'idle', label: 'Idle' };
       const status = await sendWebhook(values.webhookUrl, buildPayload('test', sample, { includeDetails: values.webhookIncludeDetails }));
       return { ok: true, detail: `Delivered (HTTP ${status})` };
     } catch (e) {
@@ -1084,7 +1287,41 @@ function registerIpc() {
   });
   ipcMain.on('notch:rect', (e, rect) => {
     const n = notches.notchFor(e.sender);
-    if (n) n.hoverRect = rect;
+    if (n) n.hoverRect = sanitizeRect(rect);
+  });
+  ipcMain.handle('extras:get', () => extrasState());
+  ipcMain.on('media:command', (_e, command) => {
+    if (media && settings.get().mediaControls) media.command(String(command));
+  });
+  ipcMain.on('timer:action', (_e, action, value) => {
+    if (!settings.get().quickTimer) return;
+    if (action === 'start') quickTimer.start(Number(value));
+    else if (action === 'stopwatch') quickTimer.startStopwatch();
+    else if (action === 'toggle') quickTimer.toggle();
+    else if (action === 'add') quickTimer.add(60000);
+    else if (action === 'stop') quickTimer.stop();
+  });
+  ipcMain.on('timer:menu', (e) => {
+    const window = BrowserWindow.fromWebContents(e.sender);
+    if (window && settings.get().quickTimer) popupMenu(Menu.buildFromTemplate(timerMenuItems()), window);
+  });
+  // Dropped paths are checked in Shelf.add (absolute, existing); everything else only acts on
+  // paths that are already on the shelf.
+  ipcMain.on('shelf:add', (_e, paths) => {
+    if (!shelf || !settings.get().shelf || !Array.isArray(paths)) return;
+    const added = shelf.add(paths.slice(0, 50).map(String));
+    if (added) log(`Shelf: added ${added} item${added === 1 ? '' : 's'}`);
+  });
+  ipcMain.on('shelf:open', (_e, p) => openShelfItem(String(p)));
+  ipcMain.on('shelf:remove', (_e, p) => shelf && shelf.remove(String(p)));
+  ipcMain.on('shelf:clear', () => shelf && shelf.clear());
+  ipcMain.on('shelf:menu', (e, p) => showShelfMenu(String(p), BrowserWindow.fromWebContents(e.sender)));
+  // Drag a shelf item out into another app (Explorer, a mail, a chat, an editor...).
+  ipcMain.on('shelf:drag', (e, p) => {
+    p = String(p);
+    if (!shelf || !shelf.has(p)) return;
+    const icon = shelfIcons.get(p);
+    e.sender.startDrag({ file: p, icon: icon && !icon.isEmpty() ? icon : trayImage(null, false) });
   });
   ipcMain.on('menu:show', (e) => {
     const window = BrowserWindow.fromWebContents(e.sender);
@@ -1119,8 +1356,10 @@ function registerIpc() {
     const session = latest.find((s) => s.id === sessionId);
     const known = session && session.files && session.files.list.some((f) => f.path === filePath && f.kind !== 'deleted');
     if (!known) return;
-    if (fs.existsSync(filePath)) shell.showItemInFolder(filePath);
-    else if (fs.existsSync(path.dirname(filePath))) shell.openPath(path.dirname(filePath));
+    const target = session.wsl ? wsl.windowsPath(session.wsl, filePath) : filePath;
+    if (!target) return;
+    if (fs.existsSync(target)) shell.showItemInFolder(target);
+    else if (fs.existsSync(path.dirname(target))) shell.openPath(path.dirname(target));
   });
   ipcMain.handle('sessions:get-ended', () => endedWithLabels());
 }
@@ -1159,6 +1398,16 @@ app.whenReady().then(async () => {
   registerIpc();
   registerHotkey(settings.get().hotkey);
   syncApprovals(settings.get());
+
+  shelf = new Shelf(path.join(app.getPath('userData'), 'shelf.json'));
+  shelf.on('change', () => {
+    sendExtras();
+    loadShelfIcons();
+  });
+  loadShelfIcons();
+  quickTimer.on('change', () => sendExtras());
+  quickTimer.on('done', onTimerDone);
+  syncMedia(settings.get());
 
   tray = new Tray(trayImage(null, false));
   tray.setToolTip('Notch Picker');
@@ -1199,16 +1448,38 @@ app.whenReady().then(async () => {
     pet.setWindows(wins.map((w) => ({ id: w.id, cover: w.cover, ...toDip({ x: w.x, y: w.y, width: w.width, height: w.height }) })));
   });
   fullscreen.setWindowTracking(settings.get().pet && settings.get().petRoam);
+  // Open WSL terminals per distro: while a distro has one, it's read on every scan (see wsl.js).
+  fullscreen.on('wsl', (clients) => wsl.setClients(clients));
+  fullscreen.setWslTracking(followsWsl(settings.get()));
   fullscreen.start();
 
-  watcher = new SessionWatcher({ log });
-  watcher.on('update', (sessions) => {
+  log(`Notch Picker ${app.getVersion()} started (Electron ${process.versions.electron})`);
+  if (process.argv.includes('--settings')) openSettings();
+  if (process.argv.includes('--dashboard')) openDashboard();
+  if (process.argv.includes('--pets')) openPetSettings();
+  await startWatcher(settings.get().agent);
+});
+
+// Follows the chosen agent's sessions, replacing the previous agent's watcher.
+async function startWatcher(agent) {
+  if (watcher) {
+    watcher.removeAllListeners();
+    watcher.on('error', () => {});
+    watcher.stop();
+  }
+  latest = [];
+  const w =
+    agent === 'copilot'
+      ? new SessionWatcher({ log, wsl: followsWsl(settings.get()) ? wsl : null })
+      : new AgentSessionWatcher({ agent, log });
+  watcher = w;
+  w.on('update', (sessions) => {
     latest = sessions;
-    git.prune(sessions.map((s) => s.cwd).filter(Boolean));
+    git.prune(sessions.map(sessionFolder).filter(Boolean));
     refresh();
   });
-  watcher.on('ended', () => send('sessions:ended', endedWithLabels()));
-  watcher.on('transition', (raw) => {
+  w.on('ended', () => send('sessions:ended', endedWithLabels()));
+  w.on('transition', (raw) => {
     if (isMuted(raw.session.id)) return;
     const t = { ...raw, session: applyLabel(raw.session, settings.get().sessionLabels) };
     send('sessions:transition', t);
@@ -1221,13 +1492,16 @@ app.whenReady().then(async () => {
       if (settings.get().notifyOnDone) notify(t, { webhook: false });
     }
   });
-  watcher.on('error', (e) => log(`[watcher] ${e && e.stack ? e.stack : e}`));
-  log(`Notch Picker ${app.getVersion()} started (Electron ${process.versions.electron})`);
-  if (process.argv.includes('--settings')) openSettings();
-  if (process.argv.includes('--dashboard')) openDashboard();
-  if (process.argv.includes('--pets')) openPetSettings();
-  await watcher.start();
-});
+  w.on('error', (e) => log(`[watcher] ${e && e.stack ? e.stack : e}`));
+  log(`Following ${agentLabel(agent)} sessions`);
+  refresh(true);
+  send('sessions:ended', endedWithLabels());
+  try {
+    await w.start();
+  } catch (e) {
+    log(`[watcher] start failed: ${e && e.stack ? e.stack : e}`);
+  }
+}
 
 app.on('second-instance', (_e, argv) => {
   if (argv.includes('--settings')) openSettings();
@@ -1242,6 +1516,8 @@ app.on('before-quit', () => {
   if (approvals) approvals.stop();
   if (watcher) watcher.stop();
   if (fullscreen) fullscreen.stop();
+  if (media) media.stop();
+  quickTimer.dispose();
 });
 
 // This is a tray app: notch windows come and go with display changes, so never auto-quit.

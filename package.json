@@ -1,6 +1,6 @@
 {
   "name": "notch-picker",
-  "version": "1.17.0",
+  "version": "1.18.0",
   "description": "Dynamic Island-style notch showing live GitHub Copilot CLI session status (Windows; macOS/Linux experimental)",
   "main": "src/main.js",
   "scripts": {

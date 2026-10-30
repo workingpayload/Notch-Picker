@@ -4,6 +4,28 @@ const form = document.getElementById('form');
 const statusEl = document.getElementById('status');
 let statusTimer = null;
 
+// What following each agent can and can't show (Copilot: everything, so no note).
+const AGENT_NOTES = {
+  claude:
+    'Follows Claude Code sessions (~/.claude). Permission prompts and questions show as needing you; answer them in the terminal.',
+  codex:
+    "Follows Codex sessions (~/.codex). Codex doesn't log approval prompts, so a command awaiting approval shows as running. Sessions leave the list after 30 minutes without activity.",
+  gemini:
+    "Follows Gemini CLI sessions (~/.gemini). Gemini logs tools only once they finish and doesn't log approval prompts or the end of a turn, so “Done” appears after a few quiet seconds (up to 2 minutes when its last message announced more work) and a slow tool may look finished. Sessions leave the list after 30 minutes without activity.",
+};
+
+function showAgent(agent) {
+  const note = document.getElementById('agent-note');
+  note.textContent = AGENT_NOTES[agent] || '';
+  note.parentElement.hidden = !AGENT_NOTES[agent];
+  // Approving and answering from the notch works through a Copilot CLI hook.
+  document.getElementById('approve-section').hidden = agent !== 'copilot';
+  // WSL sessions are followed for Copilot CLI, and WSL only exists on Windows.
+  document.getElementById('wsl-toggle').hidden = agent !== 'copilot' || !/Windows/.test(navigator.userAgent);
+  // Now playing reads Windows' media session.
+  document.getElementById('media-toggle').hidden = !/Windows/.test(navigator.userAgent);
+}
+
 function flashStatus(text) {
   statusEl.textContent = text;
   clearTimeout(statusTimer);
@@ -18,6 +40,7 @@ function fill(values) {
     if (input.type === 'checkbox') input.checked = !!values[input.name];
     else input.value = values[input.name];
   }
+  showAgent(values.agent);
 }
 
 const hotkeyHelp = document.getElementById('hotkey-help');

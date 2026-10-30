@@ -20,8 +20,13 @@
   --input: #ffd60a;
   --error: #ff453a;
   --stuck: #ff6b35;
+  --media: #ff375f;
+  --timer: #ff9f0a;
   --accent: var(--idle);
   --spring: cubic-bezier(0.32, 1.25, 0.5, 1);
+  /* A real spring (overshoot and settle) for the island's shape changes. */
+  --island-spring: linear(0, 0.067, 0.225, 0.417, 0.606, 0.771, 0.9, 0.99, 1.047, 1.076, 1.084, 1.078, 1.065, 1.049, 1.033, 1.019, 1.008, 1.001, 0.996, 0.994, 0.993, 0.993, 1);
+  --pop-spring: linear(0, 0.086, 0.288, 0.53, 0.76, 0.946, 1.072, 1.142, 1.163, 1.151, 1.118, 1.079, 1.041, 1.01, 0.989, 0.977, 0.973, 0.975, 0.98, 0.987, 0.993, 0.998, 1.002, 1.004, 1);
 }
 
 /* Light theme (explicit, or following Windows when the theme is 'system') */
@@ -128,6 +133,8 @@ body {
 .status-input { --accent: var(--input); }
 .status-error { --accent: var(--error); }
 .status-stuck { --accent: var(--stuck); }
+.status-media { --accent: var(--media); }
+.status-timer { --accent: var(--timer); }
 
 /* Collapsed bar */
 .bar {
@@ -585,6 +592,15 @@ body {
   margin-left: auto;
   flex: none;
   font-variant-numeric: tabular-nums;
+}
+
+.card .info .wsl {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 9.5px;
+  letter-spacing: 0.03em;
 }
 
 .empty-card {
@@ -1394,5 +1410,722 @@ body[data-align='right'] {
   .card.tagged,
   .dots i.tagged {
     forced-color-adjust: none;
+  }
+}
+
+/* ===================== Dynamic Island ===================== */
+
+/* The island: [shoulder][pill][shoulder][split bubble]. The window's body centres (or edge-aligns) it. */
+.island {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+}
+
+.notch {
+  transform-origin: 50% 0;
+}
+
+.shoulder,
+.bubble {
+  display: none;
+}
+
+/* Concave "shoulders": the pill flows out of the top edge of the screen like a real notch. */
+body.island-style .island > .shoulder,
+body.island-style .bubble .shoulder {
+  display: block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+}
+
+body.island-style .shoulder.left {
+  background: radial-gradient(circle at 0 100%, transparent 7.5px, var(--bg) 8px);
+}
+
+body.island-style .shoulder.right {
+  background: radial-gradient(circle at 100% 100%, transparent 7.5px, var(--bg) 8px);
+}
+
+body.island-style .notch {
+  border-radius: 0 0 14px 14px;
+  transition:
+    width 0.55s var(--island-spring),
+    height 0.55s var(--island-spring),
+    border-radius 0.35s ease,
+    box-shadow 0.4s ease,
+    scale 0.35s var(--pop-spring);
+}
+
+body.island-style .notch.expanded {
+  border-radius: 0 0 24px 24px;
+}
+
+body.island-style .notch.bannered {
+  border-radius: 0 0 22px 22px;
+}
+
+/* Click-to-open mode: hovering only "peeks" (the pill swells a little). */
+body.island-style .notch.peek {
+  scale: 1.035 1.12;
+}
+
+/* Compact layout: status on the left, time/progress on the right, an empty "camera" gap between. */
+body.island-style .notch .bar {
+  padding: 0 10px 1px 9px;
+}
+
+body.island-style .notch:not(.text-banner) .bar .detail {
+  display: none;
+}
+
+body.island-style .bar .meta {
+  margin-left: auto;
+  gap: 6px;
+}
+
+body.island-style .notch.empty .bar .detail {
+  display: block;
+  flex: none;
+}
+
+/* Cover art in the pill (now playing) */
+.bar .art {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.bar .art[hidden],
+.notch.has-art .bar .indicator {
+  display: none;
+}
+
+/* Waveform: playing media, or the agent thinking */
+.wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.5px;
+  height: 12px;
+}
+
+.wave[hidden] {
+  display: none;
+}
+
+.wave i {
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent);
+  transform: scaleY(0.35);
+  animation: wave 0.9s ease-in-out infinite;
+}
+
+.wave i:nth-child(2) { animation-duration: 0.75s; animation-delay: -0.3s; }
+.wave i:nth-child(3) { animation-duration: 1.05s; animation-delay: -0.6s; }
+.wave i:nth-child(4) { animation-duration: 0.8s; animation-delay: -0.15s; }
+.wave i:nth-child(5) { animation-duration: 0.95s; animation-delay: -0.45s; }
+
+.wave.paused i {
+  animation-play-state: paused;
+}
+
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Progress ring: todos done, or how far a timer has run */
+.ring {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  transform: rotate(-90deg);
+}
+
+.ring[hidden] {
+  display: none;
+}
+
+.ring circle {
+  fill: none;
+  stroke-width: 2.6;
+}
+
+.ring .track {
+  stroke: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.ring .fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transition: stroke-dashoffset 0.35s ease;
+}
+
+/* Banner: the pill grows into a card for a few seconds */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 58px;
+  padding: 4px 16px 6px 12px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.banner[hidden],
+.notch.bannered .bar {
+  display: none;
+}
+
+.banner-icon {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+.banner-icon .glyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.banner-icon img {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.banner.tagged .banner-icon .glyph {
+  box-shadow: 0 0 0 2px var(--tag);
+}
+
+.banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.banner-title,
+.banner-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banner-title {
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.banner-sub {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.banner-side {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.banner-side .wave {
+  height: 16px;
+  gap: 2px;
+}
+
+.banner-side .wave i {
+  width: 2.5px;
+}
+
+/* Battery glyph (charging / low battery banners) */
+.battery {
+  position: relative;
+  width: 30px;
+  height: 15px;
+  padding: 2px;
+  border: 1.5px solid var(--accent);
+  border-radius: 4px;
+}
+
+.battery::after {
+  content: '';
+  position: absolute;
+  top: 3.5px;
+  right: -4.5px;
+  width: 2.5px;
+  height: 5px;
+  border-radius: 0 1.5px 1.5px 0;
+  background: var(--accent);
+}
+
+.battery b {
+  display: block;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--accent);
+}
+
+/* Split bubble: a second live activity pops out beside the pill */
+body.island-style .bubble {
+  display: flex;
+  align-items: flex-start;
+  flex: none;
+  max-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(-22px) scale(0.55);
+  transform-origin: 0 0;
+  pointer-events: none;
+  transition:
+    max-width 0.5s var(--island-spring),
+    opacity 0.25s ease,
+    transform 0.55s var(--pop-spring);
+}
+
+body.island-style .island.split .bubble {
+  max-width: 40px;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+body.island-style .bubble .shoulder {
+  width: 6px;
+  height: 6px;
+}
+
+body.island-style .bubble .shoulder.left {
+  background: radial-gradient(circle at 0 100%, transparent 5.5px, var(--bg) 6px);
+}
+
+body.island-style .bubble .shoulder.right {
+  background: radial-gradient(circle at 100% 100%, transparent 5.5px, var(--bg) 6px);
+}
+
+.bubble-body {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 24px;
+  padding-bottom: 1px;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  border-radius: 0 0 12px 12px;
+  cursor: pointer;
+}
+
+.bubble-body .art {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.bubble-body .ring {
+  width: 14px;
+  height: 14px;
+}
+
+.bubble-body .wave {
+  height: 10px;
+}
+
+.bubble-body .wave i {
+  width: 1.5px;
+}
+
+.bubble-body .bubble-tag {
+  position: absolute;
+  left: 4px;
+  top: 7px;
+  width: 3px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--tag);
+}
+
+.bubble-body .bubble-more {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--dim);
+  line-height: 1;
+}
+
+/* Scrolling the pill to a session highlights its card */
+.card.featured {
+  animation: featured 1.2s ease-out;
+}
+
+@keyframes featured {
+  0% {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* ---- Extras in the panel: now playing, timer, shelf ---- */
+
+.panel-header .timer-btn {
+  flex: none;
+  margin: -2px 0 0;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.panel-header .timer-btn:hover {
+  opacity: 1;
+}
+
+.panel-header .timer-btn[hidden] {
+  display: none;
+}
+
+.extras {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.extras[hidden] {
+  display: none;
+}
+
+.media-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.media-card .cover {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.media-card .cover.none {
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--media) 20%, var(--card));
+  color: var(--media);
+  font-size: 18px;
+}
+
+.media-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.media-title,
+.media-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-title {
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.media-sub {
+  color: var(--dim);
+  font-size: 10.5px;
+}
+
+.media-progress {
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.media-progress .meter {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--faint);
+  overflow: hidden;
+}
+
+.media-progress .meter b {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--fg);
+  opacity: 0.8;
+}
+
+.media-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.icon-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.icon-btn svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.icon-btn.main {
+  width: 28px;
+  height: 28px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.icon-btn.main svg {
+  width: 15px;
+  height: 15px;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--button-hover);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* Running timer in the panel header */
+.panel-header .timer-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: -3px 0 0;
+  padding: 1px 7px 1px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.panel-header .timer-chip[hidden] {
+  display: none;
+}
+
+.panel-header .timer-chip.paused {
+  opacity: 0.6;
+}
+
+.panel-header .timer-chip .ring {
+  width: 12px;
+  height: 12px;
+}
+
+.shelf {
+  padding: 5px 6px 6px;
+  border-radius: 10px;
+  background: var(--card);
+  border: 1px dashed transparent;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.shelf.dropping {
+  border-color: var(--tool);
+  background: color-mix(in srgb, var(--tool) 12%, var(--card));
+}
+
+.shelf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 3px 4px;
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.link-btn:hover {
+  color: var(--fg);
+}
+
+.shelf-items {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.shelf-items::-webkit-scrollbar {
+  height: 4px;
+}
+
+.shelf-items::-webkit-scrollbar-thumb {
+  background: var(--faint);
+  border-radius: 2px;
+}
+
+.shelf-item {
+  flex: none;
+  max-width: 130px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 4px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  cursor: grab;
+  transition: background 0.15s ease;
+}
+
+.shelf-item:hover,
+.shelf-item:focus-visible {
+  background: var(--card-hover);
+}
+
+.shelf-item .file-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  -webkit-user-drag: none;
+}
+
+.shelf-item .file-icon.none {
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+}
+
+.shelf-item .name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.drop-zone {
+  padding: 6px;
+  border-radius: 8px;
+  color: var(--dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.shelf.dropping .drop-zone {
+  color: var(--tool);
+  font-weight: 600;
+}
+
+.shelf-items + .drop-zone {
+  margin-top: 6px;
+}
+
+/* Dragging files over the notch: it lights up as a drop target. */
+.notch.dropping {
+  box-shadow: 0 0 0 2px var(--tool), 0 10px 34px color-mix(in srgb, var(--tool) 45%, transparent);
+}
+
+@media (forced-colors: active) {
+  .shoulder,
+  .bubble {
+    display: none !important;
+  }
+
+  .wave,
+  .ring,
+  .banner-icon,
+  .battery,
+  .icon-btn.main {
+    forced-color-adjust: none;
+  }
+
+  .media-card,
+  .shelf {
+    border: 1px solid CanvasText;
   }
 }

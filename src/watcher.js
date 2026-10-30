@@ -31,19 +31,33 @@ function pidAlive(pid) {
 }
 
 // Lock files can outlive a crashed CLI and the PID can be reused, so confirm the process name once per PID.
+// Resolves the lower-case image name, '' when no such process, or null when it can't be checked.
 const pidNameCache = new Map();
-function pidIsCopilot(pid) {
+function pidImageName(pid) {
   if (pidNameCache.has(pid)) return pidNameCache.get(pid);
   const pending = new Promise((resolve) => {
-    if (process.platform !== 'win32') return resolve(true);
+    if (process.platform !== 'win32') return resolve(null);
     execFile('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
-      if (err) return resolve(true);
+      if (err) return resolve(null);
       const m = /^"([^"]+)"/.exec(String(stdout).trim());
-      resolve(m ? COPILOT_PROCESS_NAMES.has(m[1].toLowerCase()) : false);
+      resolve(m ? m[1].toLowerCase() : '');
     });
   });
   pidNameCache.set(pid, pending);
   return pending;
+}
+
+async function pidHasName(pid, names) {
+  const name = await pidImageName(pid);
+  return name === null || names.has(name);
+}
+
+function forgetPid(pid) {
+  pidNameCache.delete(pid);
+}
+
+function pidIsCopilot(pid) {
+  return pidHasName(pid, COPILOT_PROCESS_NAMES);
 }
 
 function parseWorkspaceYaml(text) {
@@ -257,9 +271,14 @@ class SessionWatcher extends EventEmitter {
     fallbackReadMs = 5000,
     endedTtlMs = 30 * 60 * 1000,
     log = () => {},
+    wsl = null,
   } = {}) {
     super();
+    this.agent = 'copilot';
     this.root = root;
+    // WslLocator (see wsl.js) for sessions inside WSL distros, or null.
+    this.wsl = wsl;
+    this.dirs = new Map(); // session id -> session-state folder, for live and recently ended sessions
     this.pollMs = pollMs;
     this.scanMs = scanMs;
     this.log = log;
@@ -287,14 +306,18 @@ class SessionWatcher extends EventEmitter {
   }
 
   async start() {
+    this.stopped = false;
     if (this.watch) this.startWatching();
     await this.scan();
     await this.tick();
+    // Stopped while starting (e.g. the user switched agents).
+    if (this.stopped) return;
     this.timers.push(setInterval(() => this.scan().catch((e) => this.emit('error', e)), this.scanMs));
     this.timers.push(setInterval(() => this.requestTick(), this.pollMs));
   }
 
   stop() {
+    this.stopped = true;
     this.timers.forEach(clearInterval);
     this.timers = [];
     clearTimeout(this.changeTimer);
@@ -366,49 +389,103 @@ class SessionWatcher extends EventEmitter {
     return !!this.fsWatcher;
   }
 
+  // Distros (WSL) that have a live session.
+  liveDistros() {
+    const distros = new Set();
+    for (const t of this.trackers.values()) if (t.wsl) distros.add(t.wsl.distro);
+    return distros;
+  }
+
   async liveSessionIds() {
     const ids = new Map();
+    const roots = [{ root: this.root, wsl: null }];
+    if (this.wsl) {
+      try {
+        for (const r of await this.wsl.roots(this.liveDistros())) roots.push({ root: r.root, wsl: r });
+      } catch (e) {
+        this.log(`WSL sessions: ${e.message}`);
+      }
+      // A distro held back until wsl.exe confirms it still runs keeps its sessions meanwhile.
+      for (const t of this.trackers.values()) {
+        if (t.wsl && this.wsl.isHeld && this.wsl.isHeld(t.wsl.distro)) ids.set(t.id, { dir: t.dir, pid: t.pid, wsl: t.wsl });
+      }
+    }
+    await Promise.all(roots.map((r) => this.liveSessionsIn(r, ids)));
+    return ids;
+  }
+
+  // WSL folders are read only while their distro is known to be running (see wsl.js).
+  readable(t) {
+    return !t.wsl || !this.wsl || !this.wsl.canRead || this.wsl.canRead(t.wsl.distro);
+  }
+
+  async liveSessionsIn({ root, wsl }, ids) {
+    // A failed read of a WSL share is usually a hiccup: keep the sessions it holds until the next
+    // scan rather than flashing them as ended. (A stopped distro isn't scanned at all.)
+    const keep = (id) => {
+      const t = wsl && this.trackers.get(id);
+      if (t && t.wsl && t.wsl.root === root) ids.set(id, { dir: t.dir, pid: t.pid, wsl: t.wsl });
+    };
     let entries;
     try {
-      entries = await fsp.readdir(this.root, { withFileTypes: true });
+      entries = await fsp.readdir(root, { withFileTypes: true });
     } catch {
-      return ids;
+      if (wsl) for (const id of this.trackers.keys()) keep(id);
+      return;
     }
     await Promise.all(
       entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
         .map(async (e) => {
-          const dir = path.join(this.root, e.name);
+          const dir = path.join(root, e.name);
           let files;
           try {
             files = await fsp.readdir(dir);
           } catch {
+            keep(e.name);
             return;
           }
           for (const f of files) {
             const m = /^inuse\.(\d+)\.lock$/.exec(f);
             if (!m) continue;
             const pid = Number(m[1]);
+            // A WSL session's PID belongs to its distro, not to Windows.
+            if (wsl) {
+              const live = await this.wsl.pidIsCopilot(wsl, pid);
+              if (live) {
+                ids.set(e.name, { dir, pid, wsl });
+                return;
+              }
+              if (live === null) keep(e.name);
+              continue;
+            }
             if (pidAlive(pid) && (await pidIsCopilot(pid))) {
-              ids.set(e.name, { dir, pid });
+              ids.set(e.name, { dir, pid, wsl: null });
               return;
             }
             if (!pidAlive(pid)) pidNameCache.delete(pid);
           }
         })
     );
-    return ids;
+  }
+
+  // The session-state folder of a live or recently ended session.
+  sessionDir(id) {
+    return this.dirs.get(id) || null;
   }
 
   async scan() {
     const live = await this.liveSessionIds();
-    for (const [id, { dir, pid }] of live) {
+    for (const [id, { dir, pid, wsl }] of live) {
       let t = this.trackers.get(id);
       if (!t) {
         t = new SessionTracker(id, dir, { onUnknownType: (type, sid) => this.noteUnknownType(type, sid) });
+        t.wsl = wsl;
         this.trackers.set(id, t);
+        this.dirs.set(id, dir);
         await t.refreshWorkspace();
-      } else if (!this.watching) {
+      } else if ((!this.watching || t.wsl) && this.readable(t)) {
+        // File watching doesn't reach WSL folders.
         await t.refreshWorkspace();
       }
       if (t.pid !== pid) {
@@ -434,6 +511,7 @@ class SessionWatcher extends EventEmitter {
     const s = t.lastSnap;
     this.ended.set(t.id, {
       id: t.id,
+      agent: this.agent,
       name: s.name,
       cwd: s.cwd,
       model: s.model,
@@ -442,6 +520,7 @@ class SessionWatcher extends EventEmitter {
       summary: t.state.lastMessage || '',
       premiumRequests: s.usage ? s.usage.premiumRequests : 0,
       todos: t.todos,
+      ...(t.wsl ? { wsl: t.wsl.distro } : {}),
     });
   }
 
@@ -457,6 +536,7 @@ class SessionWatcher extends EventEmitter {
 
   emitEnded(now = Date.now()) {
     for (const [id, e] of this.ended) if (now - e.endedAt >= this.endedTtlMs) this.ended.delete(id);
+    for (const id of this.dirs.keys()) if (!this.trackers.has(id) && !this.ended.has(id)) this.dirs.delete(id);
     const list = [...this.ended.values()].sort((a, b) => b.endedAt - a.endedAt);
     const payload = JSON.stringify(list);
     if (payload === this.lastEndedPayload) return;
@@ -471,9 +551,9 @@ class SessionWatcher extends EventEmitter {
   async tick() {
     const now0 = Date.now();
     // With file watching, only re-read sessions that changed (plus a slow safety re-read);
-    // without it, read every session on every tick.
+    // without it, read every session on every tick. WSL folders can't be watched.
     const due = [...this.trackers.values()].filter(
-      (t) => !this.watching || t.dirty || !t.loaded || now0 - t.lastPolled >= this.fallbackReadMs
+      (t) => this.readable(t) && (!this.watching || t.wsl || t.dirty || !t.loaded || now0 - t.lastPolled >= this.fallbackReadMs)
     );
     await Promise.all(
       due.map(async (t) => {
@@ -499,7 +579,9 @@ class SessionWatcher extends EventEmitter {
       }
       // Resumed after ending (e.g. `copilot --resume`): it is live again.
       this.ended.delete(t.id);
+      snap.agent = this.agent;
       snap.pid = t.pid;
+      if (t.wsl) snap.wsl = t.wsl.distro;
       snap.todos = t.todos;
       snap.planTitle = t.planTitle;
       t.lastSnap = snap;
@@ -536,4 +618,4 @@ function compareSessions(a, b) {
   return (b.lastEventAt || 0) - (a.lastEventAt || 0);
 }
 
-module.exports = { SessionWatcher, SessionTracker, parseWorkspaceYaml, compareSessions, copilotHome };
+module.exports = { SessionWatcher, SessionTracker, parseWorkspaceYaml, compareSessions, copilotHome, pidAlive, pidHasName, forgetPid };

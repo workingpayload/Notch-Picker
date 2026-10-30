@@ -5,7 +5,9 @@
 #   {"quns":2,"fullscreen":{"x":0,"y":0,"width":1920,"height":1200},"fg":4657504}   (physical pixels)
 # With "windows on", it also prints the visible app windows (for desktop pets) when they change:
 #   {"windows":[[hwnd,left,top,right,bottom,cover],...]}   (topmost first, physical pixels; cover = maximized)
-# Reads commands on stdin: "focus <hwnd>" brings that window to the foreground; "windows on|off".
+# With "wsl on", it also prints the open WSL terminals per distro (wsl.exe processes and distro
+# launchers, apart from Docker Desktop's and the app's own), whenever they change: {"wslClients":{"Ubuntu":2}}
+# Reads commands on stdin: "focus <hwnd>" brings that window to the foreground; "windows on|off"; "wsl on|off".
 param([int]$IntervalMs = 700, [int]$ParentPid = 0)
 
 $ErrorActionPreference = 'Stop'
@@ -140,19 +142,131 @@ $lastWindows = ''
 $trackWindows = $false
 $windowsMs = 300
 $windowsElapsed = 0
+$trackWsl = $false
+$wslMs = 2000
+$wslElapsed = 0
+$lastWsl = $null
+$wslSeen = @{}  # wsl.exe / launcher PID -> the distro it's a terminal for ('' = not a terminal), looked up once
+$wslProcs = @{} # PID -> Process of each counted terminal, checked for exit on every tick
+$lxss = @{ At = [datetime]::MinValue; Names = @{}; Default = ''; Launchers = @{} }
+
+# Registered distros (refreshed every minute): GUID -> name, the default distro, and launcher
+# process names (ubuntu2204 for Ubuntu-22.04).
+function Update-Lxss {
+  if (((Get-Date) - $lxss.At).TotalSeconds -lt 60) { return }
+  $lxss.At = Get-Date
+  $names = @{}
+  $launchers = @{}
+  $default = ''
+  try {
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
+    $defaultId = ([string](Get-ItemProperty -Path $key -ErrorAction Stop).DefaultDistribution).Trim('{}').ToLowerInvariant()
+    foreach ($sub in Get-ChildItem -Path $key -ErrorAction Stop) {
+      $name = [string](Get-ItemProperty -Path $sub.PSPath -ErrorAction SilentlyContinue).DistributionName
+      if (-not $name -or $name -match '^docker-desktop') { continue }
+      $id = $sub.PSChildName.Trim('{}').ToLowerInvariant()
+      $names[$id] = $name
+      $launchers[($name -replace '[^A-Za-z0-9]', '').ToLowerInvariant()] = $name
+      if ($id -eq $defaultId) { $default = $name }
+    }
+  } catch { }
+  $lxss.Names = $names
+  $lxss.Launchers = $launchers
+  $lxss.Default = $default
+}
+
+# The distro a wsl.exe command line opens a terminal on, or '' (Docker Desktop's, management
+# commands such as wsl --list / --shutdown, unknown distros).
+function Get-WslTarget([string]$cl) {
+  if ($cl -match 'docker-desktop') { return '' }
+  if ($cl -match '(?i)\s(?:-l|--list|--shutdown|-t|--terminate|--status|--update|--install|--unregister|--export|--import|-s|--set-default|--set-version|--set-default-version|--mount|--unmount|--manage|--version|--help)(?:\s|$)') { return '' }
+  if ($cl -match '(?i)\s(?:-d|--distribution)\s+"?([^"\s]+)') {
+    $want = $Matches[1]
+    foreach ($name in $lxss.Names.Values) { if ($name -ieq $want) { return $name } }
+    return ''
+  }
+  if ($cl -match '(?i)\s--distribution-id\s+"?\{?([0-9a-f-]{36})') {
+    $id = $Matches[1].ToLowerInvariant()
+    if ($lxss.Names.ContainsKey($id)) { return $lxss.Names[$id] }
+    return ''
+  }
+  return $lxss.Default
+}
+
+# The distro a process is a terminal for. The app's own wsl.exe calls (git status, distro list)
+# don't count, and a wsl.exe started by another wsl.exe counts the same as its parent.
+function Get-ClientDistro($proc, $ids, [int]$depth = 0) {
+  if ($wslSeen.ContainsKey($proc.Id)) { return $wslSeen[$proc.Id] }
+  $info = Get-CimInstance Win32_Process -Filter "ProcessId=$($proc.Id)" -Property ParentProcessId, CommandLine -ErrorAction SilentlyContinue
+  $distro = ''
+  if ($info -and [int]$info.ParentProcessId -ne $ParentPid) {
+    $parentId = [int]$info.ParentProcessId
+    $parent = if ($depth -lt 3 -and $ids -contains $parentId) { Get-Process -Id $parentId -ErrorAction SilentlyContinue } else { $null }
+    if ($proc.ProcessName -ne 'wsl') { $distro = [string]$lxss.Launchers[$proc.ProcessName.ToLowerInvariant()] }
+    elseif ($parent -and $parent.ProcessName -eq 'wsl') { $distro = Get-ClientDistro $parent $ids ($depth + 1) }
+    else { $distro = Get-WslTarget ([string]$info.CommandLine) }
+  }
+  $wslSeen[$proc.Id] = $distro
+  if ($distro) { $wslProcs[$proc.Id] = $proc }
+  return $distro
+}
+
+function Update-WslClients {
+  Update-Lxss
+  $procs = @(Get-Process -Name (@('wsl') + @($lxss.Launchers.Keys)) -ErrorAction SilentlyContinue)
+  $ids = @($procs | ForEach-Object { $_.Id })
+  foreach ($k in @($wslSeen.Keys)) { if ($ids -notcontains $k) { $wslSeen.Remove($k); $wslProcs.Remove($k) } }
+  foreach ($p in $procs) { [void](Get-ClientDistro $p $ids) }
+}
+
+# Drops counted terminals that exited; true if any did.
+function Remove-ExitedWslClients {
+  $gone = $false
+  foreach ($k in @($wslProcs.Keys)) {
+    $exited = $false
+    try { $exited = $wslProcs[$k].HasExited } catch { }
+    if ($exited) { $wslProcs.Remove($k); $wslSeen[$k] = ''; $gone = $true }
+  }
+  return $gone
+}
+
+function Write-WslClients {
+  $counts = @{}
+  foreach ($k in $wslProcs.Keys) { $d = $wslSeen[$k]; if ($d) { $counts[$d] = 1 + [int]$counts[$d] } }
+  $key = (($counts.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ',')
+  if ($key -ceq $lastWsl) { return }
+  $script:lastWsl = $key
+  [Console]::Out.WriteLine((@{ wslClients = $counts } | ConvertTo-Json -Compress))
+  [Console]::Out.Flush()
+}
+
 $stdin = New-Object System.IO.StreamReader([Console]::OpenStandardInput())
 $pending = $stdin.ReadLineAsync()
 $tickMs = 100
 $elapsed = $IntervalMs
 while ($true) {
-  # Commands from the app, one per line: "focus <hwnd>", "windows on|off". EOF means the app went away.
+  # Commands from the app, one per line: "focus <hwnd>", "windows on|off", "wsl on|off". EOF means the app went away.
   if ($pending.IsCompleted) {
     $cmd = $pending.Result
     if ($null -eq $cmd) { exit 0 }
     if ($cmd -match '^focus (\d+)$') { [void][NotchFullscreen]::Focus([long]$Matches[1]); $elapsed = $IntervalMs }
     if ($cmd -eq 'windows on') { $trackWindows = $true; $lastWindows = ''; $windowsElapsed = $windowsMs }
     if ($cmd -eq 'windows off') { $trackWindows = $false }
+    if ($cmd -eq 'wsl on') { $trackWsl = $true; $lastWsl = $null; $wslElapsed = $wslMs }
+    if ($cmd -eq 'wsl off') { $trackWsl = $false }
     $pending = $stdin.ReadLineAsync()
+  }
+  # Open WSL terminals per distro, as {"wslClients":{"Ubuntu":1}}: rescanned every 2 s, and a
+  # terminal's exit (e.g. by wsl --shutdown) is reported within a tick.
+  if ($trackWsl) {
+    $changed = $false
+    try { $changed = Remove-ExitedWslClients } catch { }
+    if ($wslElapsed -ge $wslMs) {
+      $wslElapsed = 0
+      try { Update-WslClients } catch { }
+      $changed = $true
+    }
+    if ($changed) { Write-WslClients }
   }
   # App windows (for desktop pets), as {"windows":[[hwnd,l,t,r,b],...]} whenever they change.
   if ($trackWindows -and $windowsElapsed -ge $windowsMs) {
@@ -180,4 +294,5 @@ while ($true) {
   Start-Sleep -Milliseconds $tickMs
   $elapsed += $tickMs
   $windowsElapsed += $tickMs
+  $wslElapsed += $tickMs
 }

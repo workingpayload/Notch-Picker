@@ -244,6 +244,7 @@ class NotchManager {
         n.win.hide();
         if (n.hovering) {
           n.hovering = false;
+          n.hoverRegion = null;
           n.win.setIgnoreMouseEvents(true);
           n.win.webContents.send('notch:hover', false);
         }
@@ -261,11 +262,18 @@ class NotchManager {
       const x = p.x - b.x;
       const y = p.y - b.y;
       const r = n.hoverRect;
-      const inside = x >= r.x && x <= r.x + r.width && y >= 0 && y <= r.y + r.height;
-      if (inside === n.hovering) continue;
+      // The pill hangs from the top edge (y from 0); extra rects are the split bubble, which takes
+      // clicks without opening the panel (the renderer is told which part is hovered).
+      const inPill = x >= r.x && x <= r.x + r.width && y >= 0 && y <= r.y + r.height;
+      const inExtra = !inPill && (r.extra || []).some((e) => x >= e.x && x <= e.x + e.width && y >= 0 && y <= e.y + e.height);
+      const inside = inPill || inExtra;
+      const region = inPill ? 'pill' : inExtra ? 'bubble' : null;
+      if (inside === n.hovering && region === n.hoverRegion) continue;
+      const changed = inside !== n.hovering;
       n.hovering = inside;
-      n.win.setIgnoreMouseEvents(!inside);
-      n.win.webContents.send('notch:hover', inside);
+      n.hoverRegion = region;
+      if (changed) n.win.setIgnoreMouseEvents(!inside);
+      n.win.webContents.send('notch:hover', inside, region);
       // An idle-hidden notch stayed up only because it was hovered.
       if (!inside && this.idleHidden) this.applyVisibility();
     }
@@ -276,4 +284,13 @@ class NotchManager {
   }
 }
 
-module.exports = { NotchManager };
+// A pill rectangle reported by a notch renderer ({ x, y, width, height, extra: [rects] }), or null.
+function sanitizeRect(rect) {
+  const ok = (r) => r && ['x', 'y', 'width', 'height'].every((k) => Number.isFinite(r[k])) && r.width >= 0 && r.height >= 0;
+  if (!ok(rect)) return null;
+  const pick = (r) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+  const extra = Array.isArray(rect.extra) ? rect.extra.filter(ok).slice(0, 3).map(pick) : [];
+  return { ...pick(rect), extra };
+}
+
+module.exports = { NotchManager, sanitizeRect };

@@ -2,6 +2,7 @@
 
 const { execFile } = require('child_process');
 const { EventEmitter } = require('events');
+const { parseWslPath } = require('./wsl');
 
 const TTL_MS = 15000;
 const TIMEOUT_MS = 4000;
@@ -55,6 +56,12 @@ class GitInfo extends EventEmitter {
     return hit ? hit.info : null;
   }
 
+  // The cached info without scheduling a refresh.
+  peek(cwd) {
+    const hit = cwd ? this.cache.get(cwd) : null;
+    return hit ? hit.info : null;
+  }
+
   drain() {
     while (this.active < MAX_CONCURRENT && this.queue.length) {
       const cwd = this.queue.shift();
@@ -80,16 +87,24 @@ class GitInfo extends EventEmitter {
   }
 }
 
+const STATUS_ARGS = ['status', '--porcelain=v2', '--branch', '--untracked-files=normal'];
+
+// The command for a folder: Linux git inside the distro for folders on the WSL share (much faster
+// than Windows git over the share, and not refused as a repository owned by another user).
+function gitCommand(cwd) {
+  const wsl = parseWslPath(cwd);
+  if (wsl) return ['wsl.exe', ['-d', wsl.distro, '-e', 'git', '--no-optional-locks', '-C', wsl.linuxPath, ...STATUS_ARGS]];
+  return ['git', ['--no-optional-locks', '-C', cwd, ...STATUS_ARGS]];
+}
+
 // Resolves stdout, or null when the folder is not a repository / git is unavailable.
 function runGit(cwd) {
+  const [file, args] = gitCommand(cwd);
   return new Promise((resolve) => {
-    execFile(
-      'git',
-      ['--no-optional-locks', '-C', cwd, 'status', '--porcelain=v2', '--branch', '--untracked-files=normal'],
-      { windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 },
-      (err, stdout) => resolve(err ? null : stdout)
+    execFile(file, args, { windowsHide: true, timeout: TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
+      resolve(err ? null : stdout)
     );
   });
 }
 
-module.exports = { GitInfo, parseStatus };
+module.exports = { GitInfo, parseStatus, gitCommand };

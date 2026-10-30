@@ -2,6 +2,8 @@
 
 // Outgoing webhooks for alerts (e.g. to Slack, Teams workflows, Discord, or your own service).
 
+const { agentLabel } = require('./agents');
+
 const TIMEOUT_MS = 10000;
 
 const EVENTS = {
@@ -28,14 +30,16 @@ function folderOf(cwd) {
 function buildPayload(kind, session, { includeDetails = false, now = Date.now() } = {}) {
   const spec = EVENTS[kind] || EVENTS.test;
   const s = session || {};
-  const name = s.name || 'Copilot session';
+  const who = agentLabel(s.agent);
+  const name = s.name || `${who} session`;
   let what = `${spec.verb}`;
   if (kind === 'attention') what = s.status === 'input' ? 'is waiting for your answer' : 'needs approval';
-  const text = `${spec.emoji} Copilot ${what} — ${name}${includeDetails && s.detail ? `: ${s.detail}` : ''}`;
+  const text = `${spec.emoji} ${who} ${what} — ${name}${includeDetails && s.detail ? `: ${s.detail}` : ''}`;
   const payload = {
     text,
     content: text,
     event: kind,
+    agent: s.agent || 'copilot',
     session: { id: s.id || null, name },
     status: s.status || null,
     label: s.label || null,

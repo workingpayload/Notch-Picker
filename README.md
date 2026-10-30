@@ -1,6 +1,35 @@
 # Notch Picker
 
-A Dynamic Island-style notch for Windows that shows the live status of your GitHub Copilot CLI sessions.
+A Dynamic Island-style notch for Windows that shows the live status of your coding agent's sessions: GitHub Copilot CLI (default), Claude Code, Codex CLI or Gemini CLI.
+
+## Choosing the agent
+
+Pick the agent in *Settings → Agent* (or the tray's *Agent* submenu). The notch follows one agent at a time and switches immediately. Everything below (cards, pets, alerts, webhooks, colour tags, mute) works for every agent, with these differences:
+
+| | Copilot CLI | Claude Code | Codex CLI | Gemini CLI |
+|---|---|---|---|---|
+| Reads | `~/.copilot/session-state` | `~/.claude/sessions` + `~/.claude/projects` | `~/.codex/state_*.sqlite` + `~/.codex/sessions` | `~/.gemini/tmp/<project>/chats` |
+| Live sessions | while the CLI runs | while the CLI runs | log written in the last 30 min | log written in the last 30 min |
+| Approval / question waits | ✓ | ✓ (Claude Code 2.1+) | shown as a running tool | not logged |
+| Running tools | ✓ | ✓ | ✓ | only once finished |
+| "Done" | instantly | instantly | instantly | after ~6 s without new output (2 min if its last message announced more work); a slow tool can look finished |
+| Usage | premium requests, quota, tokens, context | tokens | tokens, context | tokens |
+| Click to open terminal | ✓ | ✓ | – | – |
+| Approve & answer from the notch | ✓ | – | – | – |
+
+Session titles come from the agent when it has one (Claude Code's `/rename`, Codex thread titles, Gemini summaries), otherwise the first prompt. *Copy resume command* gives `claude --resume <id>`, `codex resume <id>` or `gemini --resume <id>`. The folders follow `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `GEMINI_CLI_HOME` when set. Nothing is installed into the other agents' configuration.
+
+## WSL sessions
+
+Copilot CLI sessions running inside WSL distros show up next to the Windows ones, with a **WSL** tag on their card (hover it for the distro). The notch reads `~/.copilot/session-state` in every home of each running distro through `\\wsl.localhost`, and checks that a session is live in the distro's own processes. Everything on the card works the same: status, todos, subagents, files changed, usage, alerts, pets, webhooks and *Recently ended*. For a WSL session:
+
+- *Open folder* and clicking a changed file open it in Explorer through `\\wsl.localhost`; *Open folder in VS Code* opens it with VS Code's WSL extension.
+- The git branch comes from git inside the distro.
+- *Open terminal* can't trace a Linux process to its Windows window, so it brings forward a window connected to that distro: a VS Code window opened on it when the session runs in VS Code's terminal, otherwise a terminal running `wsl.exe` for it (by name, `--distribution-id` or as the default distro) or its launcher. With several, it picks the one whose title mentions the session's folder.
+- *Copy resume command* gives `copilot --resume <id>`, to run inside the distro.
+- Approving and answering from the notch isn't available: the hook is only installed for Copilot CLI on Windows, so WSL sessions ask in their terminal.
+
+Reading a distro's files keeps WSL running, so the notch never starts a stopped distro, and reads a running one continuously only while it has a live Copilot session or a terminal open on it (`wsl.exe`, including Windows Terminal and VS Code, or a launcher such as `ubuntu2204.exe`). Otherwise it looks once every 30 seconds, and an unused distro still shuts down as usual. When a distro's terminal closes, as `wsl --shutdown` closes them all, the notch stops reading it until `wsl.exe` confirms it's still running. A session started some other way (e.g. over SSH) in a distro with no terminal open can take up to 30 seconds to appear. A `COPILOT_HOME` set inside the distro isn't followed, and the usage dashboard counts Windows sessions only. Turn it off with *Settings → Agent → Include WSL sessions*.
 
 ## What it shows
 
@@ -16,7 +45,7 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 | Error | red, error message |
 | Done / Idle | green check briefly flashes when a turn finishes, then grey |
 
-- **Collapsed:** status of the most urgent session (approval > input > working > idle), elapsed time, and one dot per live session.
+- **Collapsed:** status of the most urgent session (approval > input > working > idle) and elapsed time. In the classic style there is one dot per live session; in Dynamic Island style the next live activity pops out into a bubble instead (see below).
 - **Hover:** expands to a card for each live session showing:
   - name, folder, git branch and elapsed time. The branch shows ↑/↓ for commits ahead of or behind upstream, and an amber ●N for changed files. Hover it for details.
   - your last prompt
@@ -28,12 +57,12 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 - **Recent activity:** each card has a collapsible list of the session's last five tool calls, with ✓/✕ results and durations. A running call shows a live timer.
 - **Subagents:** a collapsible tree under the session (open automatically while agents are running). Each running subagent shows its model, elapsed time, number of tool calls and current step. The last five finished agents show ✓/✕, duration, tool calls and tokens.
 - **Files changed:** a collapsible list of every file the session (including its subagents) created (+), edited (✎) or deleted (−), newest first, with edit counts and which subagent changed it. Click a file to show it in Explorer. Only edits that succeeded are counted. Files changed through shell commands aren't detected.
-- **Click a card** to bring that session's terminal window to the front. This works with Windows Terminal, conhost and VS Code. In Windows Terminal it focuses the right window, but not a specific tab.
+- **Click a card** to bring that session's terminal window to the front. This works with Windows Terminal, conhost and VS Code. In Windows Terminal it focuses the right window, but not a specific tab. For WSL sessions, see [WSL sessions](#wsl-sessions).
 - **Right-click a card** (or use its **⋯** button) for:
   - *Open terminal*, *Open folder*, *Open folder in VS Code*
   - *Rename…*, *Reset name*, *Colour tag*
   - *Mute session*
-  - *Copy resume command*, *Copy session ID*, *Open session-state folder*
+  - *Copy resume command*, *Copy session ID*, *Open session-state folder* (other agents: *Show session log*)
 - **Name and tag sessions:** *Rename…* turns the card's title into a text box (Enter saves, Esc cancels, empty goes back to Copilot's name). *Colour tag* gives the session one of eight colours: a stripe on its card, a swatch before its name, a ring around its dot in the pill, and a small bar in the collapsed pill when that session is the one shown. Your names appear everywhere the session does: cards, pill, notifications, webhooks, *Recently ended*. Hover a renamed card's title to see Copilot's name. Labels are stored in the notch's settings by session ID, so a resumed session keeps them; Copilot's own session files aren't changed.
 - **Mute a session:** a muted session never takes over the pill, sends notifications, chimes or flashes. Its card is dimmed and moved to the bottom, and its dot is faded. Unmute it from the same menu.
 - **Size:** *Tiny*, *Small* (default) or *Normal*, from the tray menu or Settings.
@@ -47,6 +76,21 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 - **Recently ended:** sessions that exit, or whose CLI crashes, while the notch is running are listed under *Recently ended* for 30 minutes, with their premium requests and todo progress. Click one to copy its `copilot --resume` command, open its folder, or remove it from the list. Resuming a session moves it back to the live list.
 - **Position:** *Top center* (default), *Top left* or *Top right*. Drag the pill sideways by its top bar to fine-tune where it sits; the spot is remembered. Double-click the bar, or use *Position → Reset dragged offset*, to snap back.
 - **Theme:** *Dark* (default), *Light*, or *Match Windows*, which follows your Windows app theme. *Opacity* (50–100%) makes the pill and panel background see-through. Status colours are adjusted for contrast in the light theme.
+
+## Dynamic Island (on by default)
+
+*Settings → Dynamic Island* turns each part on or off. With *Dynamic Island style* off, the notch keeps the classic flat pill.
+
+- **Shape:** concave "shoulders" join the pill to the top edge of the screen. The collapsed pill shows the status on the left and the time or progress on the right, with an empty gap in the middle like a camera cut-out. Shape changes use a spring, and the pill squishes and its content un-blurs whenever what it shows changes.
+- **Live activities:** a session that is working, a running timer, and music or video that is playing. The pill shows the most important one. The next one pops out into a small **bubble** beside it (+N when there are more); click the bubble to open that session's terminal, or to play/pause the media or timer. When no session is working, playing media takes over the pill with its cover and a waveform.
+- **Waveform and progress ring:** a waveform while the agent thinks or media plays, and a ring for the session's todo progress or the timer.
+- **Event banners:** when a session finishes, fails or needs you, a timer ends, charging starts, the battery runs low or the song changes, the pill grows into a card for a few seconds. It waits while the pointer is on it. Click it to open the session's terminal; swipe or scroll up to dismiss it. With banners off, events show as text in the pill as before.
+- **Gestures:** scroll on the pill to switch which session it shows (its card is highlighted in the panel). Swipe down to open the panel, or pin it if it is already open. Swipe up to close it. Long-press to pin or unpin. *Open the panel on: Click* makes hovering only peek (the pill swells a little); click or swipe down to open it.
+- **Now playing** (Windows): whatever is playing in any app that reports to Windows' media controls (Spotify, browsers, Media Player…): cover, title, artist, app, progress, and previous / play-pause / next buttons in the panel. A small PowerShell helper reads it; it only runs while the setting is on.
+- **File shelf:** drag files or folders onto the notch (it lights up as a drop target) to keep them in the panel. Drag them out again into Explorer, a mail, a chat or an editor; click to open, right-click to show in folder, copy the path or remove. The shelf stores paths only (in `shelf.json` in the settings folder), and files that are moved or deleted drop off. Only folders, documents, images, audio/video and archives are opened; anything else (programs, scripts, shortcuts) is shown in its folder instead, so opening a shelf item never runs code.
+- **Quick timer:** pick a timer (1 minute to 1 hour) or a stopwatch from the ⏱ button in the panel header or *Timer* in the notch / tray menu. It shows in the pill or the bubble and as a chip in the panel header (click to pause, right-click for more). When it ends you get a banner, a chime and a notification.
+- **Battery banners:** when charging starts, and when the battery drops to 20%, 10% and 5%.
+- Playing media and a running timer count as activity for *Compact when idle* and *Auto-hide when idle*.
 
 ## Desktop pets (off by default)
 
@@ -207,7 +251,7 @@ Copilot CLI writes each session to `%USERPROFILE%\.copilot\session-state\<sessio
 - `session.db` / `plan.md` — the session's todo list and plan. They are read only (SQLite, via Node's built-in `node:sqlite`) and re-read only when they change.
 - `events.jsonl` — append-only event log. One recursive `fs.watch` on `session-state` re-reads only the session that changed, usually within a few hundred milliseconds. A slow polling pass covers any missed notifications. On startup only the last 8 MB is replayed in full; earlier lines are scanned once just for usage totals, so premium-request and token counts cover the whole session.
 
-`src/session-state.js` is a pure reducer that turns events (`user.message`, `assistant.turn_*`, `tool.execution_*`, `permission.*`, `subagent.*`, `session.task_complete`, `abort`, `session.error`, `session.shutdown`, …) into a status. `src/watcher.js` discovers sessions and emits updates and transitions. `src/alerts.js` decides when to notify. `src/focus-terminal.ps1` finds and focuses a session's terminal window. `src/notches.js` manages one transparent, click-through window per target display. `src/todos.js` reads todo progress. `src/git-info.js` caches `git status` per folder: it refreshes every 15 s, runs at most two at a time, and uses `--no-optional-locks` so it never blocks your own git commands. `src/tray-icon.js` draws the status tray icon. `src/fullscreen-monitor.ps1` is a small background helper that reports full-screen apps and quiet hours; it exits automatically when the app does. `src/approval.js` runs the local endpoint the hooks (`src/hooks/permission-hook.js`) call; `src/questions.js` turns `ask_user` forms into notch fields and validates answers. `src/updater.js` wraps electron-updater. `src/main.js` ties everything together.
+`src/session-state.js` is a pure reducer that turns events (`user.message`, `assistant.turn_*`, `tool.execution_*`, `permission.*`, `subagent.*`, `session.task_complete`, `abort`, `session.error`, `session.shutdown`, …) into a status. `src/watcher.js` discovers sessions and emits updates and transitions; `src/wsl.js` finds Copilot CLI sessions inside running WSL distros and decides when their files may be read. For the other agents, `src/agent-logs.js` translates Claude Code transcripts, Codex rollouts and Gemini chat logs into the same events (mapping their tool names, so details and changed files work), and `src/agent-watcher.js` finds each agent's live sessions and adds what its log lacks: Claude Code's own idle/waiting status, and Gemini's end of turn after a quiet period. `src/agents.js` lists the supported agents. `src/alerts.js` decides when to notify. `src/focus-terminal.ps1` finds and focuses a session's terminal window. `src/notches.js` manages one transparent, click-through window per target display. `src/todos.js` reads todo progress. `src/git-info.js` caches `git status` per folder: it refreshes every 15 s, runs at most two at a time, and uses `--no-optional-locks` so it never blocks your own git commands. `src/tray-icon.js` draws the status tray icon. `src/fullscreen-monitor.ps1` is a small background helper that reports full-screen apps, quiet hours and the WSL terminals open per distro; it exits automatically when the app does. `src/approval.js` runs the local endpoint the hooks (`src/hooks/permission-hook.js`) call; `src/questions.js` turns `ask_user` forms into notch fields and validates answers. `src/updater.js` wraps electron-updater. `src/main.js` ties everything together.
 
 ## Test
 

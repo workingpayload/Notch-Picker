@@ -1,12 +1,12 @@
 'use strict';
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('notchApi', {
   getSessions: () => ipcRenderer.invoke('sessions:get'),
   onUpdate: (cb) => ipcRenderer.on('sessions:update', (_e, sessions) => cb(sessions)),
   onTransition: (cb) => ipcRenderer.on('sessions:transition', (_e, t) => cb(t)),
-  onHover: (cb) => ipcRenderer.on('notch:hover', (_e, hovering) => cb(hovering)),
+  onHover: (cb) => ipcRenderer.on('notch:hover', (_e, hovering, region) => cb(hovering, region)),
   onChime: (cb) => ipcRenderer.on('notch:chime', (_e, kind) => cb(kind)),
   reportRect: (rect) => ipcRenderer.send('notch:rect', rect),
   showMenu: () => ipcRenderer.send('menu:show'),
@@ -39,6 +39,21 @@ contextBridge.exposeInMainWorld('notchApi', {
   onAnnounce: (cb) => ipcRenderer.on('notch:announce', (_e, t) => cb(t)),
   togglePin: () => ipcRenderer.send('notch:toggle-pin'),
   drag: (phase) => ipcRenderer.send('notch:drag', phase),
+  // Island extras: now playing, quick timer, file shelf.
+  getExtras: () => ipcRenderer.invoke('extras:get'),
+  onExtras: (cb) => ipcRenderer.on('extras:update', (_e, extras) => cb(extras)),
+  onExtrasEvent: (cb) => ipcRenderer.on('extras:event', (_e, event) => cb(event)),
+  mediaCommand: (command) => ipcRenderer.send('media:command', command),
+  timerAction: (action, value) => ipcRenderer.send('timer:action', action, value),
+  timerMenu: () => ipcRenderer.send('timer:menu'),
+  // A dropped File's path (File.path is gone in sandboxed renderers).
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  shelfAdd: (paths) => ipcRenderer.send('shelf:add', paths),
+  shelfOpen: (p) => ipcRenderer.send('shelf:open', p),
+  shelfRemove: (p) => ipcRenderer.send('shelf:remove', p),
+  shelfClear: () => ipcRenderer.send('shelf:clear'),
+  shelfMenu: (p) => ipcRenderer.send('shelf:menu', p),
+  shelfDrag: (p) => ipcRenderer.send('shelf:drag', p),
   // Pet settings window.
   openPetSettings: () => ipcRenderer.send('pets:open'),
   getPetSessions: () => ipcRenderer.invoke('pets:sessions'),

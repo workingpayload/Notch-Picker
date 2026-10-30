@@ -6,8 +6,13 @@ const { EventEmitter } = require('events');
 const { isAllowedFeedUrl } = require('./updater');
 const { sanitizeLabels } = require('./labels');
 const { SPECIES } = require('./pet-sprites');
+const { AGENT_IDS } = require('./agents');
 
 const SCHEMA = {
+  // Which coding agent's sessions the notch follows.
+  agent: { type: 'enum', values: AGENT_IDS, default: 'copilot' },
+  // Also follow Copilot CLI sessions running inside WSL distros (Windows).
+  wslSessions: { type: 'boolean', default: true },
   size: { type: 'enum', values: ['tiny', 'small', 'normal'], default: 'small' },
   display: { type: 'enum', values: ['primary', 'cursor', 'all'], default: 'primary' },
   theme: { type: 'enum', values: ['dark', 'light', 'system'], default: 'dark' },
@@ -16,6 +21,20 @@ const SCHEMA = {
   offsetX: { type: 'number', default: 0, min: -4000, max: 4000 },
   compactWhenIdle: { type: 'boolean', default: false },
   autoHideWhenIdle: { type: 'boolean', default: false },
+  // Dynamic Island look: concave edges, split bubble, squish animations, live progress and waveform.
+  islandStyle: { type: 'boolean', default: true },
+  // The pill grows into a short banner for events (done, error, needs you, timer, charging).
+  islandBanners: { type: 'boolean', default: true },
+  // 'click': hovering only peeks; a click (or swipe down) opens the panel.
+  expandOn: { type: 'enum', values: ['hover', 'click'], default: 'hover' },
+  // Now playing (Windows media session) with play/pause and skip.
+  mediaControls: { type: 'boolean', default: true },
+  // Drop files on the notch to keep them; drag them out again later.
+  shelf: { type: 'boolean', default: true },
+  // Banner when charging starts and when the battery runs low.
+  batteryAlerts: { type: 'boolean', default: true },
+  // Timer / stopwatch from the notch.
+  quickTimer: { type: 'boolean', default: true },
   hotkey: { type: 'accelerator', default: 'Control+Alt+N' },
   hideInFullscreen: { type: 'boolean', default: true },
   muteInFocusAssist: { type: 'boolean', default: true },

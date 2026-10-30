@@ -3,6 +3,8 @@
 // Decides when a session deserves a desktop notification or a "stuck" warning.
 // Pure (no Electron) so it can be unit tested.
 
+const { agentLabel } = require('./agents');
+
 const ATTENTION = new Set(['approval', 'input']);
 
 function stuckKind(session, now, settings) {
@@ -57,11 +59,12 @@ function minutes(ms) {
 
 function describeAlert(alert, now = Date.now()) {
   const s = alert.session;
-  const where = s.name || 'Copilot session';
+  const who = agentLabel(s.agent);
+  const where = s.name || `${who} session`;
   switch (alert.kind) {
     case 'attention':
       return {
-        title: s.status === 'approval' ? `Copilot needs approval — ${where}` : `Copilot is waiting for you — ${where}`,
+        title: s.status === 'approval' ? `${who} needs approval — ${where}` : `${who} is waiting for you — ${where}`,
         body: s.detail || s.label,
       };
     case 'stuck-waiting':
@@ -69,9 +72,9 @@ function describeAlert(alert, now = Date.now()) {
     case 'stuck-tool':
       return { title: `Possibly stuck: ${s.label} for ${minutes(now - s.since)} — ${where}`, body: s.detail || '' };
     case 'done':
-      return { title: `Copilot finished — ${where}`, body: s.detail || '' };
+      return { title: `${who} finished — ${where}`, body: s.detail || '' };
     case 'error':
-      return { title: `Copilot error — ${where}`, body: s.detail || '' };
+      return { title: `${who} error — ${where}`, body: s.detail || '' };
     default:
       return { title: where, body: s.label || '' };
   }

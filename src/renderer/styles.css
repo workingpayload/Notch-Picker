@@ -112,7 +112,7 @@ body {
     height 0.42s var(--spring),
     border-radius 0.3s ease,
     box-shadow 0.4s ease;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .notch.empty {
@@ -121,7 +121,6 @@ body {
 
 .notch.expanded {
   border-radius: 0 0 18px 18px;
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
 }
 
 .status-idle { --accent: var(--idle); }
@@ -645,7 +644,7 @@ body {
     box-shadow: 0 0 0 2px var(--done), 0 6px 30px color-mix(in srgb, var(--done) 75%, transparent);
   }
   100% {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    box-shadow: none;
   }
 }
 
@@ -654,7 +653,7 @@ body {
     box-shadow: 0 0 0 2px var(--error), 0 6px 30px color-mix(in srgb, var(--error) 75%, transparent);
   }
   100% {
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    box-shadow: none;
   }
 }
 

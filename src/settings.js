@@ -29,6 +29,8 @@ const SCHEMA = {
   expandOn: { type: 'enum', values: ['hover', 'click'], default: 'hover' },
   // Now playing (Windows media session) with play/pause and skip.
   mediaControls: { type: 'boolean', default: true },
+  // Now playing takes its colours from the album cover instead of the default pink.
+  mediaArtColors: { type: 'boolean', default: true },
   // Drop files on the notch to keep them; drag them out again later.
   shelf: { type: 'boolean', default: true },
   // Banner when charging starts and when the battery runs low.

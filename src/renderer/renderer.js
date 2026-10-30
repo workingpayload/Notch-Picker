@@ -1753,6 +1753,8 @@ function applySize(values) {
   features.shelf = !values || values.shelf !== false;
   features.battery = !values || values.batteryAlerts !== false;
   features.timer = !values || values.quickTimer !== false;
+  artColorsOn = !values || values.mediaArtColors !== false;
+  applyArtColors();
   document.body.classList.toggle('island-style', islandStyle);
   if (wasIsland !== islandStyle) lastShapeKey = '';
   renderBar();

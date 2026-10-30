@@ -225,6 +225,45 @@ function liveTickExtras(now) {
 
 // ---- Extras from the main process ----
 
+// Now-playing colours from the album cover (Settings → Dynamic Island → Album colours): the cover
+// is sampled on a tiny canvas and its colours replace the default pink wherever media shows.
+let artColorsOn = true;
+let artColorsFor = null;
+const artCanvas = document.createElement('canvas');
+artCanvas.width = artCanvas.height = 24;
+const ART_VARS = { dark: '--art-dark', dark2: '--art2-dark', light: '--art-light', light2: '--art2-light' };
+
+function setArtColors(palette) {
+  const style = document.documentElement.style;
+  for (const [key, name] of Object.entries(ART_VARS)) {
+    if (palette) style.setProperty(name, palette[key]);
+    else style.removeProperty(name);
+  }
+}
+
+function applyArtColors() {
+  const m = features.media && artColorsOn ? extras.media : null;
+  const art = (m && m.art) || null;
+  if (art === artColorsFor) return;
+  artColorsFor = art;
+  if (!art) {
+    setArtColors(null);
+    return;
+  }
+  const img = new Image();
+  img.onload = () => {
+    if (artColorsFor !== art) return;
+    const ctx = artCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.clearRect(0, 0, artCanvas.width, artCanvas.height);
+    ctx.drawImage(img, 0, 0, artCanvas.width, artCanvas.height);
+    setArtColors(window.ArtColors.artPalette(ctx.getImageData(0, 0, artCanvas.width, artCanvas.height).data));
+  };
+  img.onerror = () => {
+    if (artColorsFor === art) setArtColors(null);
+  };
+  img.src = art;
+}
+
 let lastTrackKey = null;
 // The media helper reports what was already playing a moment after start-up: no banner for that.
 const extrasLoadedAt = Date.now();
@@ -248,6 +287,7 @@ function applyExtras(next) {
     }
     lastTrackKey = key;
   } else if (lastTrackKey === null) lastTrackKey = '';
+  applyArtColors();
   renderBar();
   renderExtras();
 }

@@ -24,6 +24,7 @@ function showAgent(agent) {
   document.getElementById('wsl-toggle').hidden = agent !== 'copilot' || !/Windows/.test(navigator.userAgent);
   // Now playing reads Windows' media session.
   document.getElementById('media-toggle').hidden = !/Windows/.test(navigator.userAgent);
+  document.getElementById('media-colors-toggle').hidden = !/Windows/.test(navigator.userAgent);
 }
 
 function flashStatus(text) {

@@ -1,3 +1,10 @@
+/* Now-playing colours: the album cover's (set from extras.js), or pink. Registered so a new song's
+   colours fade in. The light-theme pair is darker so it stays readable there. */
+@property --art-dark { syntax: '<color>'; inherits: true; initial-value: #ff375f; }
+@property --art2-dark { syntax: '<color>'; inherits: true; initial-value: #ff375f; }
+@property --art-light { syntax: '<color>'; inherits: true; initial-value: #ff375f; }
+@property --art2-light { syntax: '<color>'; inherits: true; initial-value: #ff375f; }
+
 :root {
   --bg-rgb: 0 0 0;
   --bg-alpha: 1;
@@ -20,13 +27,19 @@
   --input: #ffd60a;
   --error: #ff453a;
   --stuck: #ff6b35;
-  --media: #ff375f;
+  --media: var(--art-dark);
+  --media-2: var(--art2-dark);
   --timer: #ff9f0a;
   --accent: var(--idle);
   --spring: cubic-bezier(0.32, 1.25, 0.5, 1);
   /* A real spring (overshoot and settle) for the island's shape changes. */
   --island-spring: linear(0, 0.067, 0.225, 0.417, 0.606, 0.771, 0.9, 0.99, 1.047, 1.076, 1.084, 1.078, 1.065, 1.049, 1.033, 1.019, 1.008, 1.001, 0.996, 0.994, 0.993, 0.993, 1);
   --pop-spring: linear(0, 0.086, 0.288, 0.53, 0.76, 0.946, 1.072, 1.142, 1.163, 1.151, 1.118, 1.079, 1.041, 1.01, 0.989, 0.977, 0.973, 0.975, 0.98, 0.987, 0.993, 0.998, 1.002, 1.004, 1);
+  transition:
+    --art-dark 0.8s ease,
+    --art2-dark 0.8s ease,
+    --art-light 0.8s ease,
+    --art2-light 0.8s ease;
 }
 
 /* Light theme (explicit, or following Windows when the theme is 'system') */
@@ -50,6 +63,8 @@
   --input: #b58900;
   --error: #e0352b;
   --stuck: #e8590c;
+  --media: var(--art-light);
+  --media-2: var(--art2-light);
 }
 
 @media (prefers-color-scheme: light) {
@@ -73,6 +88,8 @@
     --input: #b58900;
     --error: #e0352b;
     --stuck: #e8590c;
+    --media: var(--art-light);
+    --media-2: var(--art2-light);
   }
 }
 
@@ -134,6 +151,10 @@ body {
 .status-stuck { --accent: var(--stuck); }
 .status-media { --accent: var(--media); }
 .status-timer { --accent: var(--timer); }
+/* A second colour for gradients: the cover's second colour for media, else the same colour (set on
+   every status so a card inside a now-playing pill doesn't inherit the cover's). */
+[class*='status-'] { --accent-2: var(--accent); }
+.status-media { --accent-2: var(--media-2); }
 
 /* Collapsed bar */
 .bar {
@@ -1520,7 +1541,7 @@ body.island-style .notch.empty .bar .detail {
   width: 2px;
   height: 100%;
   border-radius: 1px;
-  background: var(--accent);
+  background: linear-gradient(to top, var(--accent), var(--accent-2, var(--accent)));
   transform: scaleY(0.35);
   animation: wave 0.9s ease-in-out infinite;
 }
@@ -1860,7 +1881,8 @@ body.island-style .bubble .shoulder.right {
   gap: 9px;
   padding: 6px 8px;
   border-radius: 10px;
-  background: var(--card);
+  /* Tinted with the cover's colours (pink by default). */
+  background: linear-gradient(120deg, color-mix(in srgb, var(--media) 16%, var(--card)), color-mix(in srgb, var(--media-2) 10%, var(--card)));
 }
 
 .media-card .cover {
@@ -1926,8 +1948,7 @@ body.island-style .bubble .shoulder.right {
   display: block;
   width: 0;
   height: 100%;
-  background: var(--fg);
-  opacity: 0.8;
+  background: linear-gradient(90deg, var(--media), var(--media-2));
 }
 
 .media-controls {

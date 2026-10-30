@@ -362,7 +362,7 @@ function bannerIcon(b) {
     fill.style.width = `${Math.round((b.level || 0) * 100)}%`;
     battery.append(fill);
     return battery;
-  } else if (b.kind === 'timer') icon.textContent = '⏱';
+  } else if (b.kind === 'timer') icon.append(stopwatchIcon());
   else if (b.status === 'done') icon.textContent = '✓';
   else if (b.status === 'error') icon.textContent = '✕';
   else icon.textContent = '!';

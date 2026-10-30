@@ -22,6 +22,22 @@ function icon(name) {
   return svg;
 }
 
+// Outline stopwatch in the text colour; the ⏱ emoji sits above the text baseline.
+function stopwatchIcon() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('stopwatch');
+  const circle = document.createElementNS(SVG_NS, 'circle');
+  circle.setAttribute('cx', '8');
+  circle.setAttribute('cy', '9.25');
+  circle.setAttribute('r', '5.25');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', 'M8 9.25V6.5M6.25 1.75h3.5M8 1.75V4M12.1 4.9l1.15-1.15');
+  svg.append(circle, path);
+  return svg;
+}
+
 function iconButton(name, label, onClick, { disabled = false, cls = '' } = {}) {
   const b = el('button', `icon-btn ${cls}`.trim());
   b.type = 'button';

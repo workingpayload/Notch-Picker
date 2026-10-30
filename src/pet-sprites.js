@@ -1,6 +1,6 @@
 'use strict';
 
-// Pixel-art pets (cat, dog, pig, sheep, goat) for the desktop pet. Frames are drawn fill-only on a 20×16 grid, facing right;
+// Pixel-art pets (cat, dog, pig, sheep, goat, duck, bunny, fox, robot) for the desktop pet. Frames are drawn fill-only on a 20×16 grid, facing right;
 // outline() adds a one-pixel outline around every filled pixel, and the renderer mirrors frames
 // for a cat facing left.
 //   o fur  d darker fur (stripes)  w white  p pink (inner ear)  n nose  e eye  k outline/line
@@ -191,6 +191,17 @@
 
   SPRITES.held2 = rowsWith(SPRITES.held, { 12: '....o..o....o.......', 13: '.....o.o....o.......', 14: '......w......w......' });
 
+  function rotate180(rows) {
+    return rows.map((r) => [...r].reverse().join('')).reverse();
+  }
+
+  // Backflip: the standing pose a quarter-turn at a time (counter-clockwise pitches a pet facing
+  // right backwards). The quarter-turned frames are 16×20, like the climbing ones.
+  function flipFrames(stand) {
+    return { flip1: rotateCCW(stand), flip2: rotate180(stand), flip3: rotateCCW(rotate180(stand)) };
+  }
+  Object.assign(SPRITES, flipFrames(STAND));
+
   // Climbing a screen edge: the walking frames on their side.
   SPRITES.climb1 = rotateCCW(SPRITES.walk1);
   SPRITES.climb2 = rotateCCW(SPRITES.walk2);
@@ -201,10 +212,17 @@
     sit: { fps: 1, frames: [['sit', 0], ['sit', 0], ['sit', 0], ['sitBlink', 0], ['sit', 0], ['sitTail', 0], ['sit', 0]] },
     walk: { fps: 6, frames: [['walk1', 0], ['stand', -1], ['walk2', 0], ['stand', -1]] },
     run: { fps: 12, frames: [['walk1', 0], ['stand', -1], ['walk2', 0], ['stand', -1]] },
+    // Hobbling after repeated errors: an uneven, slow step.
+    limp: { fps: 5, frames: [['walk1', 0], ['stand', 0], ['walk2', 0], ['walk2', 0], ['stand', -1], ['stand', 0]] },
     sleep: { fps: 1, frames: [['sleep', 0], ['sleep2', 0]] },
     alert: { fps: 8, frames: [['alert', 0], ['alert', -2], ['alert', -3], ['alert', -2], ['alert', 0], ['alert', 0], ['alert', 0], ['alert', 0]] },
     happy: { fps: 3, frames: [['happy', 0], ['happy', -1]] },
     celebrate: { fps: 8, frames: [['happy', 0], ['happy', -2], ['happy', -4], ['happy', -2]] },
+    // A finished todo list: a backflip, then a happy bounce.
+    party: {
+      fps: 10,
+      frames: [['stand', 0], ['stand', -2], ['flip1', -4], ['flip2', -4], ['flip3', -4], ['stand', -2], ['stand', 0], ['happy', 0], ['happy', -2], ['happy', 0]],
+    },
     scared: { fps: 10, frames: [['scared', 0], ['scared', -1]] },
     hang: { fps: 1, frames: [['hang', 0], ['hang2', 0]] },
     held: { fps: 6, frames: [['held', 0], ['held2', 0]] },
@@ -592,7 +610,378 @@
         '....................',
       ],
     },
+    duck: {
+      stand: [
+        '....................',
+        '....................',
+        '...........ooo......',
+        '..........ooooo.....',
+        '..........oooeo.....',
+        '..........ooooonnn..',
+        '...........oooonn...',
+        '............ccc.....',
+        '..o.........ooo.....',
+        '..ooo......oooo.....',
+        '..oooooooooooooo....',
+        '...oodddddoooooo....',
+        '....oooddddooooo....',
+        '.....ooooooooo......',
+        '........n...n.......',
+        '....................',
+      ],
+      sit: [
+        '....................',
+        '....................',
+        '....................',
+        '...........ooo......',
+        '..........ooooo.....',
+        '..........oooeo.....',
+        '..........ooooonnn..',
+        '...........oooonn...',
+        '............ccc.....',
+        '..o.........ooo.....',
+        '..ooo......oooo.....',
+        '..oooooooooooooo....',
+        '...oodddddoooooo....',
+        '...ooooddddooooo....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      sleep: [
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '..o.......ooo.......',
+        '..ooo....ooooo......',
+        '..oooooooooeoonn....',
+        '...oodddddoooooo....',
+        '....oooooooooooo....',
+        '....................',
+      ],
+      hang: [
+        '....................',
+        '...ww..........ww...',
+        '...oo..........oo...',
+        '...oo...oooo...oo...',
+        '...oo..oooooo..oo...',
+        '...oo..oeooeo..oo...',
+        '...oo..oonnoo..oo...',
+        '...oo...onno...oo...',
+        '...ooo..cccc..ooo...',
+        '....oooooooooooo....',
+        '....oooddddddooo....',
+        '.....oooddddooo.....',
+        '......oooooooo......',
+        '.......n....n.......',
+        '......nn....nn......',
+        '....................',
+      ],
+      held: [
+        '....................',
+        '........oooo........',
+        '.......oooooo.......',
+        '.......oeooeo.......',
+        '.......oonnoo.......',
+        '........nnnn........',
+        '........cccc........',
+        '.....oooooooooo.....',
+        '....oo.oooooo.oo....',
+        '....o..oddddo..o....',
+        '.......oddddo.......',
+        '.......oooooo.......',
+        '........oooo........',
+        '........n..n........',
+        '.......nn..nn.......',
+        '....................',
+      ],
+    },
+    bunny: {
+      stand: [
+        '....................',
+        '............oo.oo...',
+        '............op.op...',
+        '............op.op...',
+        '............op.op...',
+        '...........oooooo...',
+        '...........ooooeoo..',
+        '...........oooooon..',
+        '............occco...',
+        '.....ooooooooooo....',
+        '...oooooooooooooo...',
+        '..wooooooooooooo....',
+        '.wwoodddooooooo.....',
+        '..woooooooooooo.....',
+        '....ooo.....oo......',
+        '....................',
+      ],
+      sit: [
+        '....................',
+        '...........oo.oo....',
+        '...........op.op....',
+        '...........op.op....',
+        '...........op.op....',
+        '..........oooooo....',
+        '..........ooooeoo...',
+        '..........oooooon...',
+        '...........occco....',
+        '........ooooowwo....',
+        '.......oooooowwo....',
+        '......ooooooowwo....',
+        '.....oooooooowwo....',
+        '....wooooooooooo....',
+        '....wwoooo..oooo....',
+        '....................',
+      ],
+      sleep: [
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '..........oppoo.....',
+        '....oooooooooooooo..',
+        '...ooooooooooooooon.',
+        '..wooooddoooooeoooo.',
+        '.wwooooooooooooooo..',
+        '..woooooooooooooo...',
+        '....................',
+      ],
+      hang: [
+        '....................',
+        '...ww...o..o...ww...',
+        '...oo...p..p...oo...',
+        '...oo...o..o...oo...',
+        '...oo.oooooooo.oo...',
+        '...oo.ooeooeoo.oo...',
+        '...oo.oooonooo.oo...',
+        '...oo..occcco..oo...',
+        '...ooo.oooooo.ooo...',
+        '....oooooooooooo....',
+        '....oooowwwwoooo....',
+        '.....ooowwwwooo.....',
+        '.....ooowwwwooo.ww..',
+        '......oo....oo..w...',
+        '......oo....oo......',
+        '....................',
+      ],
+      held: [
+        '....................',
+        '.......o....o.......',
+        '.......p....p.......',
+        '.......o....o.......',
+        '......oooooooo......',
+        '......ooeooeoo......',
+        '......ooonnooo......',
+        '.......occcco.......',
+        '.....oooooooooo.....',
+        '.....o.oowwoo.o.....',
+        '.....o.oowwoo.o.....',
+        '.......oooooo.......',
+        '.......oooooo.ww....',
+        '.......o....o.......',
+        '.......o....o.......',
+        '....................',
+      ],
+    },
+    fox: {
+      stand: [
+        '....................',
+        '....................',
+        '....................',
+        '.............d...d..',
+        '............doooood.',
+        '............ooooooo.',
+        '.ww.........ooeoeoo.',
+        '.wwo........wwwnwww.',
+        '..ooo........wcccw..',
+        '...oooooooooooowwo..',
+        '...ooooooooooooww...',
+        '...ooooooooooooo....',
+        '....owwwwwwwwwoo....',
+        '.....d.d....d.d.....',
+        '.....d.d....d.d.....',
+        '....................',
+      ],
+      sit: [
+        '....................',
+        '....................',
+        '...........d...d....',
+        '..........doooood...',
+        '..........ooooooo...',
+        '..........ooeoeoo...',
+        '..........wwwnwww...',
+        '...........wcccw....',
+        '........oooowwwo....',
+        '.......ooooowwwo....',
+        '......ooooooowwo....',
+        '......ooooooowwo....',
+        '.ww...ooooooo.oo....',
+        '.wwooooooooooodod...',
+        '..ooooooooodd..d....',
+        '....................',
+      ],
+      sleep: [
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '............d...d...',
+        '.....ooooo..doooood.',
+        '...oooooooooooooooo.',
+        '..ooooooooooooeoeoo.',
+        '.wwoooooooooowwwnww.',
+        '.wwwoooooooooooooo..',
+        '....................',
+      ],
+      hang: [
+        '....................',
+        '...dd..........dd...',
+        '...oo..........oo...',
+        '...oo..d....d..oo...',
+        '...oo..dooood..oo...',
+        '...oo.oooooooo.oo...',
+        '...oo.ooeooeoo.oo...',
+        '...oo.wwwnnwww.oo...',
+        '...ooo.wccccw.ooo...',
+        '....oooooooooooo....',
+        '....oooowwwwoooo....',
+        '.....ooowwwwooo.....',
+        '.....ooowwwwooo.oo..',
+        '......dd....dd.ooo..',
+        '......dd....dd..ww..',
+        '....................',
+      ],
+      held: [
+        '....................',
+        '.......d....d.......',
+        '.......dooood.......',
+        '......oooooooo......',
+        '......ooeooeoo......',
+        '......wwwnnwww......',
+        '.......wccccw.......',
+        '.....oooooooooo.....',
+        '.....o.oowwoo.o.....',
+        '.....o.oowwoo.o.....',
+        '.....d.oowwoo.d.....',
+        '.......oooooo..oo...',
+        '.......d....d.ooo...',
+        '.......d....d.ooo...',
+        '.......d....d..ww...',
+        '....................',
+      ],
+    },
+    robot: {
+      stand: [
+        '....................',
+        '....................',
+        '..............p.....',
+        '..............d.....',
+        '...........ooooooo..',
+        '...........okkkkko..',
+        '...........okekeko..',
+        '...........okkkkko..',
+        '...........ooooooo..',
+        '..p..........ccc....',
+        '...dooooooooooooo...',
+        '....odndndndndnoo...',
+        '....ooooooooooooo...',
+        '.....d.d....d.d.....',
+        '.....k.k....k.k.....',
+        '....................',
+      ],
+      sit: [
+        '....................',
+        '..............p.....',
+        '..............d.....',
+        '...........ooooooo..',
+        '...........okkkkko..',
+        '...........okekeko..',
+        '...........okkkkko..',
+        '...........ooooooo..',
+        '.............ccc....',
+        '.........oooooooo...',
+        '........odndndndo...',
+        '.......ooooooooooo..',
+        '..p....ooooooooooo..',
+        '...dooooooooooodod..',
+        '.......kkoooookk.k..',
+        '....................',
+      ],
+      sleep: [
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '....................',
+        '..............p.....',
+        '..p..........ooooo..',
+        '...d.........okeko..',
+        '...dooooooooookkko..',
+        '...odndndndndnoooo..',
+        '...ooooooooooooooo..',
+        '....................',
+      ],
+      hang: [
+        '....................',
+        '...kk..........kk...',
+        '...dd....pp....dd...',
+        '...dd....dd....dd...',
+        '...dd.oooooooo.dd...',
+        '...dd.okkkkkko.dd...',
+        '...dd.okekkeko.dd...',
+        '...dd.okkkkkko.dd...',
+        '...dddooccccooddd...',
+        '....oooooooooooo....',
+        '....odndndndndno....',
+        '.....oooooooooo.....',
+        '.....oooooooooo..p..',
+        '......dd....dd..d...',
+        '......kk....kk......',
+        '....................',
+      ],
+      held: [
+        '....................',
+        '.........pp.........',
+        '.........dd.........',
+        '......oooooooo......',
+        '......okkkkkko......',
+        '......okekkeko......',
+        '......okkkkkko......',
+        '......ooccccoo......',
+        '.....oooooooooo.....',
+        '.....d.odndndo.d....',
+        '.....d.ooooooo.d....',
+        '.....k.ooooooo.k....',
+        '........ooooo.......',
+        '........d...d.......',
+        '........k...k..p....',
+        '....................',
+      ],
+    },
   };
+  // Two-legged: a duck waddles on its own two feet instead of the four-legged gait.
+  SPECIES_POSES.duck.walk1 = rowsWith(SPECIES_POSES.duck.stand, { 14: '.......n.....n......' });
+  SPECIES_POSES.duck.walk2 = rowsWith(SPECIES_POSES.duck.stand, { 14: '.........n.n........' });
 
   // Moves a row's filled pixels sideways (for swinging and kicking legs).
   function shiftRow(row, dx) {
@@ -611,8 +1000,8 @@
     const legs = (rows, from, dx) => rows.map((r, i) => (i >= from && i <= 14 ? shiftRow(r, dx) : r));
     const set = {
       stand: poses.stand,
-      walk1: walkRows(poses.stand, '....x...x....x......'),
-      walk2: walkRows(poses.stand, '......x.....x...x...'),
+      walk1: poses.walk1 || walkRows(poses.stand, '....x...x....x......'),
+      walk2: poses.walk2 || walkRows(poses.stand, '......x.....x...x...'),
       sit: poses.sit,
       sitBlink: blink(poses.sit),
       sleep: blink(poses.sleep),
@@ -624,6 +1013,7 @@
     set.climb1 = rotateCCW(set.walk1);
     set.climb2 = rotateCCW(set.walk2);
     set.cling = rotateCCW(set.stand);
+    Object.assign(set, flipFrames(set.stand));
     return Object.fromEntries(Object.entries(set).map(([k, v]) => [`${species}.${k}`, v]));
   }
   for (const [species, poses] of Object.entries(SPECIES_POSES)) Object.assign(SPRITES, speciesSprites(species, poses));
@@ -640,13 +1030,30 @@
     fall: 'held',
   };
 
-  const SPECIES = ['cat', 'dog', 'pig', 'sheep', 'goat'];
+  const SPECIES = ['cat', 'dog', 'pig', 'sheep', 'goat', 'duck', 'bunny', 'fox', 'robot'];
+  const SPECIES_NAMES = {
+    cat: 'Cat',
+    dog: 'Dog',
+    pig: 'Pig',
+    sheep: 'Sheep',
+    goat: 'Goat',
+    duck: 'Duck',
+    bunny: 'Bunny',
+    fox: 'Fox',
+    robot: 'Robot',
+  };
 
   const SPECIES_PALETTES = {
     dog: { o: '#c98b4f', d: '#7a4a26', w: '#f3e6d3', p: '#f29aa8', n: '#2b1d14', e: '#1e140d', k: '#2e1d10', c: '#f3e6d3' },
     pig: { o: '#f6b3c0', d: '#e08597', w: '#ffd9e0', p: '#ffcdd6', n: '#c25e72', e: '#2a1a1e', k: '#6e2f3c', c: '#f6b3c0' },
     sheep: { o: '#f4f1ea', d: '#2c2a2e', w: '#f7f5ef', p: '#f2a7b6', n: '#e08597', e: '#f4f1ea', k: '#4b4750', c: '#f7f5ef' },
     goat: { o: '#e2d6c0', d: '#6f6458', w: '#ffffff', p: '#f2a7b6', n: '#3a302a', e: '#3b2a14', k: '#4a3f35', c: '#e2d6c0' },
+    // The duck's bill and feet use the nose colour.
+    duck: { o: '#fbf7ec', d: '#d8cfb8', w: '#ffffff', p: '#f6a5b3', n: '#f39a2b', e: '#1d1a16', k: '#6b5a3a', c: '#fbf7ec' },
+    bunny: { o: '#d9cbb8', d: '#b09c86', w: '#fbf8f3', p: '#f6a5b3', n: '#e57890', e: '#2a1d1d', k: '#5a4a3c', c: '#d9cbb8' },
+    fox: { o: '#e8742c', d: '#3a2620', w: '#fff3e2', p: '#f6a5b3', n: '#2b1d14', e: '#2a1a0e', k: '#4a2412', c: '#fff3e2' },
+    // The robot's face is a dark screen ('k') with glowing eyes; 'p' is its antenna light.
+    robot: { o: '#b8c2cc', d: '#6c7a89', w: '#e8eef4', p: '#ff453a', n: '#40c8e0', e: '#40c8e0', k: '#2b3440', c: '#6c7a89' },
   };
 
   // Session colour tags (labels.js) as collar colours; same values as .tag-* in styles.css.
@@ -694,7 +1101,53 @@
       ],
     },
     dots: { color: '#c9a7ff', frames: [['.......', '.......', '.......', '.......', '.......', 'x..x..x', '.......'], ['.......', '.......', '.......', '.......', '.......', 'x..x...', '.......'], ['.......', '.......', '.......', '.......', '.......', 'x......', '.......']] },
+    // Wellbeing nudges and level-ups.
+    water: { color: '#5ac8fa', frames: [['...x...', '..xxx..', '.xxxxx.', 'xxxxxxx', 'xxxxxxx', '.xxxxx.', '..xxx..'], ['.......', '...x...', '..xxx..', '.xxxxx.', 'xxxxxxx', '.xxxxx.', '..xxx..']] },
+    stretch: { color: '#7ee787', frames: [['x.....x', 'x..x..x', '.xxxxx.', '...x...', '...x...', '..x.x..', '.x...x.'], ['.x...x.', '.x.x.x.', '..xxx..', '...x...', '...x...', '..x.x..', '.x...x.']] },
+    star: { color: '#ffd60a', frames: [['...x...', '...x...', 'xxxxxxx', '.xxxxx.', '..xxx..', '.xx.xx.', 'x.....x'], ['.......', '...x...', '.xxxxx.', '..xxx..', '..x.x..', '.......', '.......']] },
   };
+
+  // The fetch ball (r red, h highlight, s shade), outlined like the pets.
+  const BALL = ['.......', '..rrr..', '.rhrrr.', '.rrrrr.', '.rrrrs.', '..rss..', '.......'];
+  const BALL_COLORS = { r: '#ff453a', h: '#ffd0cc', s: '#b8241c', k: '#4a1410' };
+
+  // Level badge: a star, coloured by tier (see pet-stats.js), drawn above the pet's back.
+  const BADGE = ['.......', '...x...', '.xxxxx.', '..xxx..', '..x.x..', '.......'];
+  const BADGE_COLORS = { bronze: '#d08a4a', silver: '#d6dde5', gold: '#ffd60a' };
+  const BADGE_OUTLINE = '#3a2a10';
+
+  // A sweat drop beside the head while the session's context window is nearly full.
+  const SWEAT = ['.x', 'xx', 'xx'];
+  const SWEAT_COLOR = '#5ac8fa';
+
+  // Where the head (for sweat), mouth (for a carried ball) and level badge (top-left of its grid)
+  // are in a pose, in sprite pixels of a pet facing right. Poses without a spot don't show that
+  // extra (climbing and flipping show none; hanging and held pets wear no badge).
+  const ANCHORS = {
+    stand: { head: [11, 3], mouth: [15, 9], badge: [5, 2] },
+    sit: { head: [9, 2], mouth: [13, 8], badge: [1, 4] },
+    sleep: { head: [12, 9], mouth: [16, 13], badge: [4, 4] },
+    hang: { head: [6, 4], mouth: [9, 8] },
+    held: { head: [6, 2], mouth: [9, 6] },
+  };
+  const ANIM_POSE = {
+    sit: 'sit',
+    happy: 'sit',
+    celebrate: 'sit',
+    walk: 'stand',
+    run: 'stand',
+    limp: 'stand',
+    alert: 'stand',
+    scared: 'stand',
+    jump: 'stand',
+    fall: 'stand',
+    sleep: 'sleep',
+    hang: 'hang',
+    held: 'held',
+  };
+  function anchorFor(anim) {
+    return ANCHORS[ANIM_POSE[anim]] || null;
+  }
 
   // Adds a 1-px outline ('k') around filled pixels (4-neighbour), leaving existing fills untouched.
   function outline(rows) {
@@ -748,8 +1201,10 @@
   }
 
   // Window areas (in sprite pixels) that accept mouse, touch and pen input and are drawn; the
-  // rest of the window is click-through. Covers the cat at any hop height and its bubble.
-  function hitRects({ anim, facing, bubble }) {
+  // rest of the window is click-through. Covers the cat at any hop height and its bubble, and the
+  // whole box while an effect (confetti) is drawn around the pet.
+  function hitRects({ anim, facing, bubble, effect }) {
+    if (effect) return [{ x: 0, y: 0, width: WIN_COLS, height: WIN_ROWS }];
     const rects = [{ x: SPRITE_X, y: SPRITE_Y - MAX_HOP, width: SPRITE_W, height: SPRITE_H + MAX_HOP }];
     if (bubble) {
       const top = bubbleOrigin(anim, facing, SPRITE_Y - MAX_HOP, BUBBLE_MAX, BUBBLE_MAX);
@@ -771,10 +1226,19 @@
     ANIMS,
     PALETTES,
     SPECIES,
+    SPECIES_NAMES,
     SPECIES_PALETTES,
     COLLAR_COLORS,
     BUBBLES,
+    BALL,
+    BALL_COLORS,
+    BADGE,
+    BADGE_COLORS,
+    BADGE_OUTLINE,
+    SWEAT,
+    SWEAT_COLOR,
     animFor,
+    anchorFor,
     paletteFor,
     petCell,
     outline,

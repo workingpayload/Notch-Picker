@@ -1530,14 +1530,25 @@ function cyclePill(direction) {
     renderBar();
   }, PICK_RESET_MS);
   renderBar();
-  const card = [...cards.querySelectorAll('.card')].find((c) => c.dataset.id === next);
-  if (card && expanded) {
-    card.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
-    card.classList.remove('featured');
-    void card.offsetWidth;
-    card.classList.add('featured');
-  }
+  if (expanded) featureCard(next);
 }
+
+// Scrolls a session's card into view and flashes it.
+function featureCard(id) {
+  const card = [...cards.querySelectorAll('.card')].find((c) => c.dataset.id === id);
+  if (!card) return;
+  card.scrollIntoView({ block: 'nearest', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+  card.classList.remove('featured');
+  void card.offsetWidth;
+  card.classList.add('featured');
+}
+
+// A pet's sign was clicked: the request waits in this session's card (the panel is held open
+// while it does), so bring that card into view.
+window.notchApi.onFocusSession((id) => {
+  expand();
+  featureCard(id);
+});
 
 // Banner: click to act (open the session's terminal), swipe or scroll up to dismiss.
 let bannerPress = null;

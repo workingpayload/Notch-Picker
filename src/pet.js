@@ -15,7 +15,23 @@ const CHASE_MS = 7000;
 const CHASE_BAND = 220; // how far above the ground the cursor may be for the cat to chase it
 const MAX_FLING = 1800;
 const LEAVE_PAST = 100; // how far past the ground's end a leaving pet walks (out of sight)
-const REACT_MS = { happy: 1800, celebrate: 2200, scared: 1600 };
+const REACT_MS = { happy: 1800, celebrate: 2200, scared: 1600, party: 3000 };
+// Wellbeing nudges (water, stretch) stay up this long unless the pet is clicked.
+const NUDGE_MS = 2 * 60 * 1000;
+// Fetch: how close the pet must get to pick the ball up; a fetch never takes longer than this.
+const FETCH_REACH = 10;
+const FETCH_MS = 30000;
+const LIMP_SPEED = 0.5;
+// Strain: sweating from this share of the context window used; limping after this many failed tool
+// calls in a row.
+const SWEAT_AT = 0.85;
+const LIMP_AFTER = 3;
+// Signs: longest title and detail line held up by a pet.
+const SIGN_TITLE = 28;
+const SIGN_TEXT = 40;
+// Fetch ball physics.
+const BALL_BOUNCE = 0.45;
+const BALL_FRICTION = 2.2; // per second while rolling on the ground
 // Roaming the screen.
 const GROUND = 'ground'; // id of the taskbar floor
 const ROAM_SLEEP_AFTER_MS = 60000; // idle pets roam for a while before napping
@@ -94,6 +110,72 @@ function pickSpecies(species, used, next) {
   return { species: species[next % species.length], next: next + 1 };
 }
 
+function clip(text, max) {
+  const s = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+
+// What a pet holds up on its sign while its session needs you, or null.
+function petSign(session) {
+  if (!session || session.muted || (session.status !== 'approval' && session.status !== 'input')) return null;
+  const kind = session.status === 'approval' ? 'approval' : 'question';
+  return {
+    kind,
+    title: clip(session.label || (kind === 'approval' ? 'Needs approval' : 'Question for you'), SIGN_TITLE),
+    text: clip(session.detail, SIGN_TEXT),
+  };
+}
+
+// How a session's work weighs on its pet: it sweats when the context window is nearly full, and
+// limps after several failed tool calls in a row (or while the session shows an error).
+function petStrain(session) {
+  if (!session || session.muted) return { sweat: false, limp: false };
+  const u = session.usage || {};
+  const sweat = u.contextLimit > 0 && u.contextTokens / u.contextLimit >= SWEAT_AT;
+  let failed = 0;
+  for (const a of session.activity || []) {
+    if (a.running) continue;
+    if (a.ok !== false) break;
+    failed++;
+  }
+  return { sweat, limp: session.status === 'error' || failed >= LIMP_AFTER };
+}
+
+// Whether a session's todo list just got finished (every todo done), comparing the previous
+// reading with the new one. A list seen finished from the start doesn't count.
+function todosJustFinished(prev, next) {
+  const finished = (t) => !!t && t.total > 0 && t.done >= t.total;
+  return prev !== undefined && finished(next) && !finished(prev);
+}
+
+// One step of the thrown ball: it flies, bounces on the ground, rolls to a stop, and bounces off
+// the ground's ends. ball: { x, y, vx, vy, resting }; ground: { left, right, y }.
+function stepBall(ball, dt, ground) {
+  if (ball.resting) return ball;
+  const b = { ...ball };
+  b.vy += GRAVITY * dt;
+  b.x += b.vx * dt;
+  b.y += b.vy * dt;
+  if (b.x < ground.left || b.x > ground.right) {
+    b.x = clamp(b.x, ground.left, ground.right);
+    b.vx = -b.vx * BALL_BOUNCE;
+  }
+  if (b.y >= ground.y) {
+    b.y = ground.y;
+    b.vy = Math.abs(b.vy) > 120 ? -Math.abs(b.vy) * BALL_BOUNCE : 0;
+    if (b.vy === 0) {
+      b.vx *= Math.max(0, 1 - BALL_FRICTION * dt);
+      if (Math.abs(b.vx) < 8) {
+        b.vx = 0;
+        b.resting = true;
+      }
+    }
+  }
+  return b;
+}
+
 class PetBrain {
   // startAt: where along the ground (0 = left, 1 = right) the pet first appears.
   constructor({ random = Math.random, startAt = 0.8 } = {}) {
@@ -118,6 +200,8 @@ class PetBrain {
     this.nextChaseAt = 0;
     this.leap = null; // { start, ms, x0, y0, to: 'perch' | floor id, arc }
     this.landedAt = -Infinity;
+    this.nudging = null; // wellbeing reminder: { bubble: 'water' | 'stretch', until, approach }
+    this.limping = false;
   }
 
   grab() {
@@ -135,15 +219,47 @@ class PetBrain {
     this.vy = clamp(vy, -MAX_FLING, MAX_FLING);
   }
 
+  // A pat (click): wakes it up, purrs, and dismisses a wellbeing nudge.
   pet(now) {
     if (this.mode === 'held') return;
     if (this.act && this.act.kind === 'sleep') this.act = null;
+    this.nudging = null;
     this.moodSince = now; // stay awake for a while after a pat
     this.react = { kind: 'happy', until: now + REACT_MS.happy };
   }
 
   celebrate(now) {
     if (this.mode !== 'held') this.react = { kind: 'celebrate', until: now + REACT_MS.celebrate };
+  }
+
+  // A finished todo list: a backflip with confetti.
+  party(now) {
+    if (this.mode !== 'held') this.react = { kind: 'party', until: now + REACT_MS.party };
+  }
+
+  // Reached a new level: a happy hop with a star.
+  levelUp(now) {
+    if (this.mode !== 'held') this.react = { kind: 'celebrate', until: now + REACT_MS.celebrate, bubble: 'star' };
+  }
+
+  // A wellbeing reminder: runs over towards the cursor and shows the bubble until clicked.
+  nudge(now, bubble) {
+    if (this.act && this.act.kind === 'sleep') this.act = null;
+    this.moodSince = now;
+    this.nudging = { bubble, until: now + NUDGE_MS, approach: true };
+  }
+
+  // Double-clicked: chase the ball the manager just threw, then bring it back here. Only from the
+  // ground (the taskbar), and not while its session needs you.
+  fetch(now) {
+    if (this.mode !== 'ground' || this.floorId !== GROUND || this.leaving || this.mood === 'alert') return false;
+    this.react = null;
+    this.act = { kind: 'fetch', homeX: this.x, carrying: false, until: now + FETCH_MS };
+    return true;
+  }
+
+  isFetching() {
+    return !!this.act && this.act.kind === 'fetch';
   }
 
   startle(now) {
@@ -189,20 +305,27 @@ class PetBrain {
 
   // input: { ground: { left, right, y }, floors: [{ id, left, right, y }], walls: { left, right,
   //          top } | null, perch: { x, y } | null, placement, mood, cursor: { x, y }, hover,
-  //          held: { x, y } | null, chase, roam, reducedMotion }
+  //          held: { x, y } | null, chase, roam, reducedMotion, strain: { sweat, limp },
+  //          sign: { kind, title, text } | null, ball: { x, resting } | null }
   // Floors are where a pet can stand (x is the pet's centre): window tops, other pets' heads. The
   // ground (taskbar) is always one. Walls are the pet-centre x for climbing each screen edge.
-  step(now, input) {
+  step(now, rawInput) {
+    // Fetching pets keep running when the cursor (which just double-clicked them) is over them.
+    const input = this.isFetching() ? { ...rawInput, hover: false } : rawInput;
     const { ground, perch = null, placement = 'both', mood = 'none', hover = false, reducedMotion = false } = input;
     const dt = this.lastNow === null ? 0 : clamp((now - this.lastNow) / 1000, 0, 0.1);
     this.lastNow = now;
     this.speed = input.speed || 1; // speed setting: walking, running and climbing
+    this.limping = !!(input.strain && input.strain.limp);
     if (mood !== this.mood) {
       this.mood = mood;
       this.moodSince = now;
-      if (this.act && this.act.kind !== 'land') this.act = null;
+      // A fetch carries on through ordinary mood changes, but not when a session needs you.
+      const keep = this.act && (this.act.kind === 'land' || (this.act.kind === 'fetch' && mood !== 'alert' && mood !== 'asleep'));
+      if (this.act && !keep) this.act = null;
     }
     if (this.react && now >= this.react.until) this.react = null;
+    if (this.nudging && now >= this.nudging.until) this.nudging = null;
     if (this.mode === null) {
       this.mode = 'ground';
       this.x = ground.left + (ground.right - ground.left) * this.startAt;
@@ -434,12 +557,33 @@ class PetBrain {
       this.moodSince = now;
       return;
     }
+    // Mid-backflip: stay on the spot.
+    if (this.react && this.react.kind === 'party') {
+      if (this.act) this.act.moving = false;
+      return;
+    }
     if (this.act && this.act.until && now >= this.act.until) this.act = null;
+    // A wellbeing nudge: run over below the cursor first, then wait there with the bubble.
+    if (this.nudging && this.nudging.approach && mood !== 'alert') {
+      this.nudging.approach = false;
+      const target = cursor ? clamp(cursor.x, floor.left, floor.right) : this.x;
+      const until = this.nudging.until;
+      this.act =
+        !reducedMotion && Math.abs(target - this.x) > 30
+          ? { kind: 'walk', targetX: target, speed: RUN_SPEED, then: () => ({ kind: 'sit', until }) }
+          : { kind: 'sit', until };
+    }
     if (!this.act) this.act = this.plan(now, input, floor);
 
     const nearCursor = cursorNear(cursor, floor);
     const canChase =
-      chase && !reducedMotion && mood !== 'alert' && mood !== 'asleep' && !['sleep', 'chase', 'land', 'greet', 'follow'].includes(this.act.kind) && !this.act.then;
+      chase &&
+      !reducedMotion &&
+      !this.limping &&
+      mood !== 'alert' &&
+      mood !== 'asleep' &&
+      !['sleep', 'chase', 'land', 'greet', 'follow', 'fetch'].includes(this.act.kind) &&
+      !this.act.then;
     if (canChase && now >= this.nextChaseAt && nearCursor) {
       this.act = { kind: 'chase', until: now + CHASE_MS };
       this.nextChaseAt = now + 60000 + this.random() * 90000;
@@ -452,6 +596,8 @@ class PetBrain {
       if (!a.offEdge) a.targetX = clamp(a.targetX, floor.left, floor.right);
       a.moving = this.moveToward(a.targetX, a.speed || WALK_SPEED, dt);
       if (!a.moving) this.act = a.then ? a.then(now, input) : { kind: 'sit', until: now + 2000 + this.random() * 4000 };
+    } else if (a.kind === 'fetch') {
+      this.stepFetch(dt, now, input.ball, floor);
     } else if (a.kind === 'hop') {
       this.act = null;
       this.startHop(now, a.floor, reducedMotion);
@@ -471,19 +617,40 @@ class PetBrain {
     }
   }
 
+  // Fetch: run to the ball (waiting below it while it flies), pick it up once it rests, and bring
+  // it back to where the pet was double-clicked. The manager moves the ball and watches `carry`.
+  stepFetch(dt, now, ball, floor) {
+    const a = this.act;
+    if (!a.carrying) {
+      if (!ball) {
+        this.act = null;
+        return;
+      }
+      const target = clamp(ball.x, floor.left, floor.right);
+      a.moving = Math.abs(target - this.x) > FETCH_REACH / 2 && this.moveToward(target, RUN_SPEED, dt);
+      if (!a.moving && ball.x !== this.x) this.facing = ball.x > this.x ? 1 : -1;
+      if (ball.resting && Math.abs(ball.x - this.x) <= FETCH_REACH) a.carrying = true;
+      return;
+    }
+    a.moving = this.moveToward(clamp(a.homeX, floor.left, floor.right), RUN_SPEED * 0.8, dt);
+    if (!a.moving) this.act = { kind: 'sit', until: now + 3000, bubble: 'heart' };
+  }
+
   // Returns whether the pet is still on its way.
   moveToward(targetX, speed, dt) {
     const dx = targetX - this.x;
     if (Math.abs(dx) < 1) return false;
     this.facing = dx > 0 ? 1 : -1;
-    this.x += Math.sign(dx) * Math.min(Math.abs(dx), speed * (this.speed || 1) * dt);
+    const pace = speed * (this.speed || 1) * (this.limping ? LIMP_SPEED : 1);
+    this.x += Math.sign(dx) * Math.min(Math.abs(dx), pace * dt);
     return true;
   }
 
   plan(now, input, floor) {
     const r = this.random();
     const canWalk = !input.reducedMotion;
-    const roam = !!input.roam && canWalk;
+    // A limping pet doesn't climb or hop about.
+    const roam = !!input.roam && canWalk && !this.limping;
     const activity = ACTIVITY[input.activity] || ACTIVITY.normal;
     const wanders = () => roam && this.random() < activity.roam && this.roamPlan(now, input, floor);
     switch (input.mood) {
@@ -554,11 +721,12 @@ class PetBrain {
     return { kind: 'walk', targetX: clamp(this.x + dir * distance, floor.left, floor.right) };
   }
 
-  view({ mood = 'none', hover = false }) {
+  view({ mood = 'none', hover = false, strain = null, sign = null }) {
     const alert = mood === 'alert';
     let anim = 'sit';
     let bubble = null;
     let moving = false;
+    const reactBubble = (r) => r.bubble || { happy: 'heart', celebrate: 'note', scared: 'question', party: 'note' }[r.kind] || null;
     if (this.mode === 'held') {
       anim = 'held';
       moving = true;
@@ -574,7 +742,7 @@ class PetBrain {
       anim = 'hang';
       if (alert) bubble = 'alert';
       else if (hover) bubble = 'heart';
-      else if (this.react) bubble = { happy: 'heart', celebrate: 'note', scared: 'question' }[this.react.kind];
+      else if (this.react) bubble = reactBubble(this.react);
       else if (mood === 'error') bubble = 'question';
       else if (mood === 'asleep' || (mood !== 'working' && this.lastNow - this.moodSince >= SLEEP_AFTER_MS)) bubble = 'zzz';
     } else if (this.leaving) {
@@ -588,11 +756,14 @@ class PetBrain {
       bubble = 'heart';
     } else if (this.react) {
       anim = this.react.kind;
-      bubble = { happy: 'heart', celebrate: 'note', scared: null }[this.react.kind];
+      bubble = this.react.kind === 'party' || this.react.kind === 'scared' ? null : reactBubble(this.react);
+    } else if (this.nudging && !(this.act && this.act.moving)) {
+      anim = 'happy';
+      bubble = this.nudging.bubble;
     } else if (this.act) {
       const a = this.act;
       if (a.kind === 'walk') anim = (a.speed || WALK_SPEED) > WALK_SPEED ? 'run' : 'walk';
-      else if (a.kind === 'chase' || a.kind === 'follow') anim = a.moving ? 'run' : 'sit';
+      else if (a.kind === 'chase' || a.kind === 'follow' || a.kind === 'fetch') anim = a.moving ? 'run' : 'sit';
       else if (a.kind === 'greet') {
         anim = 'happy';
         bubble = 'heart';
@@ -602,7 +773,24 @@ class PetBrain {
       } else bubble = a.bubble || null;
       moving = !!a.moving;
     }
-    return { x: this.x, y: this.y, anim, facing: this.facing, bubble, moving };
+    if (this.limping && this.mode === 'ground' && (anim === 'walk' || anim === 'run')) anim = 'limp';
+    // A nudge stays visible while the pet runs over (unless something more urgent shows).
+    if (this.nudging && !bubble && !alert && !hover && this.mode !== 'held') bubble = this.nudging.bubble;
+    // On the ground, a pet whose session needs you holds up a sign instead of the "!".
+    const shownSign = alert && sign && this.mode === 'ground' && !this.leaving ? sign : null;
+    if (shownSign) bubble = null;
+    return {
+      x: this.x,
+      y: this.y,
+      anim,
+      facing: this.facing,
+      bubble,
+      moving,
+      effect: this.react && this.react.kind === 'party' && this.mode !== 'held' ? 'confetti' : null,
+      carry: this.isFetching() && this.act.carrying ? 'ball' : null,
+      sweat: !!(strain && strain.sweat) && this.mode !== 'held',
+      sign: shownSign,
+    };
   }
 }
 
@@ -640,8 +828,14 @@ module.exports = {
   choosePetSessions,
   pickSpecies,
   windowFloors,
+  petSign,
+  petStrain,
+  todosJustFinished,
+  stepBall,
   SLEEP_AFTER_MS,
   ROAM_SLEEP_AFTER_MS,
   LEAP_MS,
   RELEAP_DELAY_MS,
+  NUDGE_MS,
+  REACT_MS,
 };

@@ -1,10 +1,22 @@
 'use strict';
 
-// Pet settings window: the pet options, a live preview of the five species at the chosen size and
-// cat colour, sample sounds, and each live session's pet with a species picker.
+// Pet settings window: the pet options, a live preview of every species at the chosen size and
+// cat colour, sample sounds, levels, and each live session's pet with a species picker.
 
-const { SPECIES, SPRITES, COLLAR_COLORS, outline, flip, animFor, paletteFor, petCell } = window.PetSprites;
-const NAMES = { cat: 'Cat', dog: 'Dog', pig: 'Pig', sheep: 'Sheep', goat: 'Goat' };
+const { SPECIES, SPECIES_NAMES: NAMES, SPRITES, COLLAR_COLORS, outline, flip, animFor, paletteFor, petCell } = window.PetSprites;
+
+// Species pickers and sound samples follow the species list.
+for (const sp of SPECIES) {
+  const option = document.createElement('option');
+  option.value = sp;
+  option.textContent = NAMES[sp];
+  document.getElementById('single-species').append(option);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.dataset.species = sp;
+  button.textContent = NAMES[sp];
+  document.getElementById('sound-tests').append(button);
+}
 
 const form = document.getElementById('form');
 const statusEl = document.getElementById('status');
@@ -44,7 +56,7 @@ for (const button of document.querySelectorAll('.sound-tests button')) {
   button.addEventListener('click', () => window.PetSounds.play(button.dataset.species, 'pet'));
 }
 
-// ---- Preview: the five species walking on the spot at the chosen size ----
+// ---- Preview: every species walking on the spot at the chosen size, in two rows ----
 
 const canvas = document.getElementById('preview');
 const ctx = canvas.getContext('2d');
@@ -55,14 +67,16 @@ for (const [name, rows] of Object.entries(SPRITES)) {
   right[name] = outline(rows);
   left[name] = flip(right[name]);
 }
-const SLOT = 24; // sprite pixels per pet in the row
+const SLOT = 24; // sprite pixels per pet in a row
+const ROW = 18; // sprite pixels per row
+const PER_ROW = Math.ceil(SPECIES.length / 2);
 const MAX_WIDTH = 400; // CSS px available in the window
 let lastPreview = '';
 
 function drawPreview(force = false) {
   if (!values) return;
   const cell = petCell(values.petSize, values.size);
-  const scale = Math.min(1, MAX_WIDTH / (SLOT * SPECIES.length * cell));
+  const scale = Math.min(1, MAX_WIDTH / (SLOT * PER_ROW * cell));
   const px = cell * scale; // CSS px per sprite pixel
   const dpr = window.devicePixelRatio || 1;
   const t = Date.now();
@@ -72,8 +86,8 @@ function drawPreview(force = false) {
   const key = `${cell}|${scale}|${values.petColor}|${values.petSingleSpecies}|${values.petMode}|${facing}|${frames.map((f) => f.join()).join()}`;
   if (!force && key === lastPreview) return;
   lastPreview = key;
-  const width = Math.round(SLOT * SPECIES.length * px);
-  const height = Math.round(18 * px);
+  const width = Math.round(SLOT * PER_ROW * px);
+  const height = Math.round(ROW * 2 * px);
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   canvas.width = Math.round(width * dpr);
@@ -83,8 +97,12 @@ function drawPreview(force = false) {
     const [name, dy] = frames[i];
     const grid = (facing < 0 ? left : right)[name];
     const palette = paletteFor(sp, values.petColor);
-    const ox = i * SLOT + (SLOT - grid[0].length) / 2;
-    const oy = 18 - grid.length + dy;
+    const row = Math.floor(i / PER_ROW);
+    // The second row is centred under the first.
+    const inRow = row ? SPECIES.length - PER_ROW : PER_ROW;
+    const col = (i % PER_ROW) + (PER_ROW - inRow) / 2;
+    const ox = col * SLOT + (SLOT - grid[0].length) / 2;
+    const oy = row * ROW + ROW - grid.length + dy;
     for (let y = 0; y < grid.length; y++) {
       for (let x = 0; x < grid[y].length; x++) {
         const c = grid[y][x];
@@ -98,13 +116,51 @@ function drawPreview(force = false) {
     // Underline the pet used in "one pet for everything".
     if (values.petMode === 'single' && sp === values.petSingleSpecies) {
       ctx.fillStyle = '#0a84ff';
-      ctx.fillRect(Math.round((i * SLOT + 4) * k), Math.round(17 * k), Math.round((SLOT - 8) * k), Math.max(2, Math.round(0.5 * k)));
+      ctx.fillRect(Math.round((col * SLOT + 4) * k), Math.round((row * ROW + ROW - 1) * k), Math.round((SLOT - 8) * k), Math.max(2, Math.round(0.5 * k)));
     }
   });
   note.textContent =
     (scale < 1 ? `Shown at ${Math.round(scale * 100)}% — ` : 'Actual size — ') + SPECIES.map((sp) => NAMES[sp]).join(' · ');
 }
 setInterval(() => drawPreview(), 80);
+
+// ---- Levels: experience per species ----
+
+const levelsEl = document.getElementById('levels');
+
+function renderLevels(levels) {
+  levelsEl.textContent = '';
+  for (const sp of SPECIES) {
+    const l = levels[sp];
+    if (!l) continue;
+    const row = document.createElement('div');
+    row.className = 'level-row';
+    row.setAttribute('role', 'listitem');
+    const label = document.createElement('span');
+    const name = document.createElement('b');
+    name.textContent = `${NAMES[sp]} · ${l.level}`;
+    label.append(name);
+    const tier = l.tier;
+    if (tier) {
+      const star = document.createElement('span');
+      star.className = `tier ${tier}`;
+      star.textContent = '★';
+      star.title = `${tier[0].toUpperCase()}${tier.slice(1)} badge`;
+      label.append(star);
+    }
+    const bar = document.createElement('span');
+    bar.className = 'bar';
+    const fillBar = document.createElement('i');
+    fillBar.style.width = `${Math.round(Math.min(1, Math.max(0, l.fraction)) * 100)}%`;
+    bar.append(fillBar);
+    row.title = `Level ${l.level}: ${l.xp - l.from} of ${l.to - l.from} experience to level ${l.level + 1}`;
+    row.setAttribute('aria-label', `${NAMES[sp]}, level ${l.level}`);
+    row.append(label, bar);
+    levelsEl.append(row);
+  }
+}
+window.notchApi.onPetLevels(renderLevels);
+window.notchApi.getPetLevels().then(renderLevels);
 
 // ---- Each live session's pet ----
 

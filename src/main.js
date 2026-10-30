@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, powerMonitor, screen, shell } = require('electron');
 const { SessionWatcher, copilotHome, compareSessions } = require('./watcher');
 const { WslLocator, vscodeWslUrl } = require('./wsl');
 const { AgentSessionWatcher, agentLogFolder } = require('./agent-watcher');
@@ -23,6 +23,10 @@ const { IdleTracker } = require('./visibility');
 const { Updater, describeUpdate } = require('./updater');
 const { LABEL_COLORS, updateLabel, applyLabel, cleanName } = require('./labels');
 const { PetManager } = require('./pet-window');
+const { todosJustFinished } = require('./pet');
+const { SPECIES_NAMES } = require('./pet-sprites');
+const { PetStats, XP, badgeTier } = require('./pet-stats');
+const { Wellbeing } = require('./wellbeing');
 const { MediaMonitor } = require('./media');
 const { QuickTimer, describeDuration, TIMER_PRESETS_MIN } = require('./timer');
 const { Shelf, isOpenable } = require('./shelf');
@@ -37,9 +41,14 @@ if (process.platform === 'linux') app.commandLine.appendSwitch('enable-transpare
 const HOVER_POLL_MS = 60;
 const FOLLOW_CURSOR_MS = 400;
 const ALERT_TICK_MS = 1000;
+const WELLBEING_TICK_MS = 30000;
 
 let notches = null;
 let pet = null;
+let petStats = null;
+const wellbeing = new Wellbeing();
+// Last todo progress seen per session ({ total, done } or null), to spot a list being finished.
+const lastTodos = new Map();
 let latestDecorated = [];
 let approvals = null;
 let updater = null;
@@ -750,8 +759,6 @@ function showSessionMenu(id, window) {
 
 // ---- Desktop pets ----
 
-const SPECIES_NAMES = { cat: 'Cat', dog: 'Dog', pig: 'Pig', sheep: 'Sheep', goat: 'Goat' };
-
 // Clicking a pet while its session (single pet: any session) needs you opens that session's
 // terminal; otherwise the click is a pat. Returns whether it opened a terminal.
 function activatePet(sessionId) {
@@ -760,6 +767,87 @@ function activatePet(sessionId) {
   if (!target) return false;
   focusSession(target.id);
   return true;
+}
+
+// Clicking the sign a pet holds up: a request waiting in the notch is answered there (its card is
+// brought into view); anything else is answered in the session's terminal.
+function activateSign(sessionId) {
+  const needsYou = (s) => !s.muted && (s.status === 'approval' || s.status === 'input');
+  const target = sessionId ? latestDecorated.find((s) => s.id === sessionId && needsYou(s)) : latestDecorated.find(needsYou);
+  if (!target) return;
+  if (target.pendingApproval || target.pendingQuestion) {
+    notches.setUserHidden(false);
+    send('notch:focus-session', target.id);
+  } else focusSession(target.id);
+}
+
+// The level and badge of a species' pets.
+function petBadge(species) {
+  const { level } = petStats.get(species);
+  return { tier: badgeTier(level), level };
+}
+
+function petLevels() {
+  if (!petStats) return {};
+  return Object.fromEntries(Object.entries(petStats.all()).map(([sp, l]) => [sp, { ...l, tier: badgeTier(l.level) }]));
+}
+
+// Experience for the pet following a session (single pet: the pet) when its work moves on.
+function awardPetXp(sessionId, amount) {
+  if (!petStats || !settings.get().pet) return;
+  const species = pet.speciesOfSession(sessionId);
+  if (!species) return;
+  const level = petStats.add(species, amount);
+  if (level) {
+    pet.levelUp(species);
+    log(`${SPECIES_NAMES[species]} reached level ${level}`);
+  }
+}
+
+// A session's todo list just got finished: its pet does a backflip, and earns a bonus.
+function checkTodoLists(sessions) {
+  const ids = new Set();
+  for (const s of sessions) {
+    ids.add(s.id);
+    const next = s.todos ? { total: s.todos.total, done: s.todos.done } : null;
+    if (!s.muted && todosJustFinished(lastTodos.get(s.id), next)) {
+      pet.party(s.id);
+      awardPetXp(s.id, XP.todos);
+    }
+    lastTodos.set(s.id, next);
+  }
+  for (const id of lastTodos.keys()) if (!ids.has(id)) lastTodos.delete(id);
+}
+
+const REMINDERS = {
+  water: { title: 'Water break', body: 'Time for a sip of water.' },
+  stretch: { title: 'Stretch break', body: 'You have been at it for a while. Stand up and stretch for a minute.' },
+};
+
+// Stretch and water reminders, while pets are on: a pet runs over with a bubble, and a
+// notification is shown (not in Focus Assist or quiet hours).
+function wellbeingTick() {
+  const values = settings.get();
+  const due = wellbeing.tick(Date.now(), powerMonitor.getSystemIdleTime(), {
+    ...values,
+    petBreaks: values.pet && values.petBreaks,
+    petWater: values.pet && values.petWater,
+  });
+  for (const kind of due) {
+    pet.nudge(kind);
+    log(`Wellbeing reminder: ${kind}`);
+    const quiet = values.muteInFocusAssist && fullscreen && isQuiet(fullscreen.state);
+    if (!values.notifications || quiet || !Notification.isSupported()) continue;
+    const n = new Notification({ ...REMINDERS[kind], silent: true });
+    liveNotifications.add(n);
+    n.on('close', () => liveNotifications.delete(n));
+    n.on('click', () => liveNotifications.delete(n));
+    n.show();
+  }
+}
+
+function sendPetLevels() {
+  if (petsWin && !petsWin.isDestroyed()) petsWin.webContents.send('pets:levels', petLevels());
 }
 
 // Species choice for one session's pet: automatic (next in turn) or a fixed species.
@@ -790,20 +878,23 @@ function buildPetMenu(info) {
   const radio = (key, options) =>
     options.map(([value, label]) => ({ label, type: 'radio', checked: values[key] === value, click: () => settings.set({ [key]: value }) }));
   const session = info.sessionId && withLabels(latest).find((s) => s.id === info.sessionId);
+  const { level } = petStats.get(info.species);
+  const levelText = values.petLevels && level > 1 ? ` · level ${level}` : '';
   const own = info.sessionId
     ? [
-        { label: session ? `${SPECIES_NAMES[info.species]} of ${session.name}` : SPECIES_NAMES[info.species], enabled: false },
+        { label: (session ? `${SPECIES_NAMES[info.species]} of ${session.name}` : SPECIES_NAMES[info.species]) + levelText, enabled: false },
         { type: 'separator' },
         { label: 'Open terminal', enabled: !!session, click: () => focusSession(info.sessionId) },
         { label: 'Pet', submenu: petSpeciesItems(info.sessionId) },
       ]
     : [
-        { label: 'Desktop pet', enabled: false },
+        { label: `Desktop pet${levelText}`, enabled: false },
         { type: 'separator' },
         { label: 'Pet', submenu: radio('petSingleSpecies', Object.entries(SPECIES_NAMES)) },
       ];
   return Menu.buildFromTemplate([
     ...own,
+    { label: 'Throw a ball (or double-click the pet)', click: () => pet.throwFrom(info.window) },
     {
       label: 'Pets',
       submenu: radio('petMode', [
@@ -1086,6 +1177,7 @@ function refresh(force = false) {
   decorated.sort((a, b) => Number(a.muted) - Number(b.muted));
   latestDecorated = decorated;
   pet.setSessions(decorated);
+  checkTodoLists(decorated);
   sendPetSessions();
   const payload = JSON.stringify(decorated);
   if (force || payload !== lastSentPayload) {
@@ -1337,8 +1429,10 @@ function registerIpc() {
   });
   // From the cat window or its carry overlay; anything else is ignored inside.
   ipcMain.on('pet:painted', (e) => pet.painted(e.sender));
+  ipcMain.on('pet:sign', (e) => pet.signClicked(e.sender));
   ipcMain.on('pets:open', () => openPetSettings());
   ipcMain.handle('pets:sessions', () => petSessions());
+  ipcMain.handle('pets:levels', () => petLevels());
   ipcMain.on('pets:set-species', (_e, sessionId, species) => {
     const id = String(sessionId);
     if (!/^[\w-]{1,64}$/.test(id) || !latest.some((s) => s.id === id)) return;
@@ -1386,11 +1480,15 @@ app.whenReady().then(async () => {
     onWindowCreated: (w) => forwardConsole(w, 'notch'),
   });
   notches.sync();
+  petStats = new PetStats(path.join(app.getPath('userData'), 'pet-stats.json'));
+  petStats.on('change', sendPetLevels);
   pet = new PetManager({
     webPreferences,
     getSettings: () => settings.get(),
     getPerchRect: () => notches.perchRect(),
     onActivate: activatePet,
+    onSign: activateSign,
+    getBadge: petBadge,
     isQuiet: () => settings.get().muteInFocusAssist && !!fullscreen && isQuiet(fullscreen.state),
     onWindowCreated: (w) => forwardConsole(w, 'pet'),
   });
@@ -1419,6 +1517,7 @@ app.whenReady().then(async () => {
   setInterval(() => notches.pollHover(), HOVER_POLL_MS);
   setInterval(() => notches.followCursor(), FOLLOW_CURSOR_MS);
   setInterval(() => refresh(), ALERT_TICK_MS);
+  setInterval(() => wellbeingTick(), WELLBEING_TICK_MS);
 
   const resync = () => {
     notches.sync();
@@ -1486,8 +1585,10 @@ async function startWatcher(agent) {
     const primary = notches.primaryWindow();
     if (primary) primary.webContents.send('notch:announce', t);
     if (t.kind === 'done' || t.kind === 'error') {
-      if (t.kind === 'done') pet.celebrate(t.session.id);
-      else pet.startle(t.session.id);
+      if (t.kind === 'done') {
+        pet.celebrate(t.session.id);
+        awardPetXp(t.session.id, XP.turn);
+      } else pet.startle(t.session.id);
       webhook(t.kind, t.session);
       if (settings.get().notifyOnDone) notify(t, { webhook: false });
     }

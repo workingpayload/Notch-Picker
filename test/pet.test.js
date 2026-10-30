@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors, SLEEP_AFTER_MS, LEAP_MS, RELEAP_DELAY_MS } = require('../src/pet');
+const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors, petSign, petStrain, todosJustFinished, stepBall, SLEEP_AFTER_MS, LEAP_MS, RELEAP_DELAY_MS, NUDGE_MS, REACT_MS } = require('../src/pet');
 const { SPRITE_W, SPRITE_H, SPRITES, ANIMS, PALETTES, SPECIES, SPECIES_PALETTES, BUBBLES, outline, animFor } = require('../src/pet-sprites');
 const { sanitize } = require('../src/settings');
 
@@ -111,10 +111,10 @@ test('chases a cursor near the taskbar only when allowed', () => {
   assert.notEqual(view.anim, 'run');
 });
 
-test('sprites are 20×16 (climbing: 16×20), keep a free border for their outline, and use palette colours', () => {
+test('sprites are 20×16 (climbing and mid-flip: 16×20), keep a free border for their outline, and use palette colours', () => {
   const colours = new Set(Object.keys(PALETTES.orange));
   for (const [name, rows] of Object.entries(SPRITES)) {
-    const climbing = /(^|\.)(climb1|climb2|cling)$/.test(name);
+    const climbing = /(^|\.)(climb1|climb2|cling|flip1|flip3)$/.test(name);
     const [w, h] = climbing ? [SPRITE_H, SPRITE_W] : [SPRITE_W, SPRITE_H];
     assert.equal(rows.length, h, name);
     for (const row of rows) assert.equal(row.length, w, name);
@@ -324,4 +324,131 @@ test('roaming pets stay put while their session needs you', () => {
   const brain = new PetBrain({ random: () => 0.01 });
   const view = run(brain, 0, 5000, roamInput({ mood: 'alert' }));
   assert.deepEqual([brain.mode, view.anim], ['ground', 'alert']);
+});
+
+test('a finished todo list sets off a backflip with confetti on the spot', () => {
+  const brain = new PetBrain({ random: () => 0.1 });
+  run(brain, 0, 100, { placement: 'taskbar', mood: 'working' });
+  const x = brain.x;
+  brain.party(133);
+  let view = run(brain, 133, 1500, { placement: 'taskbar', mood: 'working' });
+  assert.deepEqual([view.anim, view.effect, brain.x], ['party', 'confetti', x]);
+  view = run(brain, 1533, 133 + REACT_MS.party + 100, { placement: 'taskbar', mood: 'working' });
+  assert.equal(view.effect, null);
+
+  assert.ok(todosJustFinished({ total: 3, done: 2 }, { total: 3, done: 3 }));
+  assert.ok(todosJustFinished(null, { total: 1, done: 1 }), 'a list made and finished between readings');
+  assert.ok(!todosJustFinished(undefined, { total: 3, done: 3 }), 'first sighting');
+  assert.ok(!todosJustFinished({ total: 3, done: 3 }, { total: 3, done: 3 }), 'already finished');
+  assert.ok(!todosJustFinished({ total: 3, done: 1 }, { total: 3, done: 2 }));
+});
+
+test('a pet whose session needs you holds up a sign on the ground, not while hanging from the notch', () => {
+  const session = { status: 'approval', label: 'Approve shell', detail: 'npm test --  ' + 'x'.repeat(60) };
+  const sign = petSign(session);
+  assert.equal(sign.kind, 'approval');
+  assert.equal(sign.title, 'Approve shell');
+  assert.ok(sign.text.length <= 40 && sign.text.endsWith('…'), sign.text);
+  assert.equal(petSign({ status: 'input', label: 'Question for you', detail: 'Which DB?' }).kind, 'question');
+  assert.equal(petSign({ status: 'tool' }), null);
+  assert.equal(petSign({ ...session, muted: true }), null);
+
+  const brain = new PetBrain({ random: () => 0.9 });
+  let view = run(brain, 0, 500, { placement: 'taskbar', mood: 'alert', sign });
+  assert.deepEqual([view.anim, view.bubble, view.sign], ['alert', null, sign]);
+  const hanging = new PetBrain({ random: () => 0.9 });
+  view = run(hanging, 0, 3000, { perch, placement: 'notch', mood: 'alert', sign });
+  assert.deepEqual([view.anim, view.bubble, view.sign], ['hang', 'alert', null]);
+});
+
+test('a pet sweats when the context window is nearly full and limps, slower, after failures', () => {
+  const usage = (contextTokens) => ({ usage: { contextTokens, contextLimit: 100000 } });
+  assert.equal(petStrain({ status: 'idle', ...usage(90000) }).sweat, true);
+  assert.equal(petStrain({ status: 'idle', ...usage(50000) }).sweat, false);
+  const failed = { ok: false };
+  assert.equal(petStrain({ status: 'tool', activity: [{ running: true }, failed, failed, failed] }).limp, true);
+  assert.equal(petStrain({ status: 'idle', activity: [failed, failed, { ok: true }, failed] }).limp, false, 'a success breaks the run');
+  assert.equal(petStrain({ status: 'error' }).limp, true);
+  assert.deepEqual(petStrain({ status: 'error', muted: true, ...usage(99000) }), { sweat: false, limp: false });
+
+  const walkFor = (strain) => {
+    const brain = new PetBrain({ random: () => 0.9 });
+    brain.step(0, { ground, placement: 'taskbar', mood: 'idle', strain });
+    const x = brain.x;
+    brain.play({ kind: 'walk', targetX: x - 500 });
+    const view = run(brain, 33, 1000, { placement: 'taskbar', mood: 'idle', strain });
+    return { view, moved: x - brain.x };
+  };
+  const limping = walkFor({ sweat: true, limp: true });
+  const walking = walkFor(null);
+  assert.deepEqual([limping.view.anim, limping.view.sweat], ['limp', true]);
+  assert.equal(walking.view.anim, 'walk');
+  assert.ok(limping.moved < walking.moved * 0.6, `${limping.moved} vs ${walking.moved}`);
+});
+
+test('fetch: the pet runs to the ball once it lands, carries it back, and puts it down', () => {
+  const brain = new PetBrain({ random: () => 0.9 });
+  run(brain, 0, 100, { placement: 'taskbar', mood: 'idle' });
+  const home = brain.x;
+  assert.ok(brain.fetch(133));
+  let ball = { x: home - 400, y: ground.y - 200, vx: -300, vy: -200, resting: false };
+  let view;
+  let carried = false;
+  for (let t = 166; t < 20000 && brain.isFetching(); t += 33) {
+    ball = stepBall(ball, 0.033, ground);
+    // Hovered by the cursor that double-clicked it: it still goes.
+    view = brain.step(t, { ground, placement: 'taskbar', mood: 'idle', hover: true, ball: carried ? null : ball });
+    if (view.carry === 'ball') carried = true;
+  }
+  assert.ok(ball.resting && ball.y === ground.y, JSON.stringify(ball));
+  assert.ok(carried, 'picked the ball up');
+  assert.ok(Math.abs(brain.x - home) < 2, `${brain.x} vs ${home}`);
+  assert.equal(view.carry, null);
+
+  // Not from a window top, and not while its session needs you.
+  const busy = new PetBrain({ random: () => 0.9 });
+  run(busy, 0, 100, { placement: 'taskbar', mood: 'alert' });
+  assert.equal(busy.fetch(133), false);
+});
+
+test('the fetch ball bounces, rolls to a stop and stays on the ground', () => {
+  let ball = { x: 1700, y: 900, vx: 900, vy: -400, resting: false };
+  let bounced = false;
+  for (let i = 0; i < 1000 && !ball.resting; i++) {
+    const next = stepBall(ball, 0.016, ground);
+    if (next.vx < 0 && ball.vx > 0) bounced = true;
+    ball = next;
+    assert.ok(ball.x >= ground.left && ball.x <= ground.right && ball.y <= ground.y);
+  }
+  assert.ok(ball.resting && bounced);
+  assert.equal(stepBall(ball, 0.016, ground), ball, 'a resting ball stays put');
+});
+
+test('a wellbeing nudge: the pet runs below the cursor, shows the bubble, and a pat dismisses it', () => {
+  const brain = new PetBrain({ random: () => 0.9 });
+  run(brain, 0, 100, { placement: 'taskbar', mood: 'idle' });
+  brain.nudge(133, 'water');
+  const cursor = { x: 400, y: 500 };
+  let view = run(brain, 133, 15000, { placement: 'taskbar', mood: 'idle', cursor, chase: false });
+  assert.ok(Math.abs(brain.x - 400) < 2, String(brain.x));
+  assert.deepEqual([view.anim, view.bubble], ['happy', 'water']);
+  brain.pet(15100);
+  view = run(brain, 15100, 15200 + 2000, { placement: 'taskbar', mood: 'idle', cursor, chase: false });
+  assert.notEqual(view.bubble, 'water');
+
+  const ignored = new PetBrain({ random: () => 0.9 });
+  run(ignored, 0, 100, { placement: 'taskbar', mood: 'idle' });
+  ignored.nudge(133, 'stretch');
+  view = run(ignored, 133, 133 + NUDGE_MS + 500, { placement: 'taskbar', mood: 'idle' });
+  assert.notEqual(view.bubble, 'stretch', 'it gives up after a while');
+});
+
+test('a level-up hops with a star; confetti makes the whole box drawable', () => {
+  const brain = new PetBrain({ random: () => 0.9 });
+  run(brain, 0, 100, { placement: 'taskbar', mood: 'idle' });
+  brain.levelUp(133);
+  const view = brain.step(166, { ground, placement: 'taskbar', mood: 'idle' });
+  assert.deepEqual([view.anim, view.bubble], ['celebrate', 'star']);
+  const { hitRects, WIN_COLS, WIN_ROWS } = require('../src/pet-sprites');
+  assert.deepEqual(hitRects({ anim: 'party', facing: 1, bubble: null, effect: 'confetti' }), [{ x: 0, y: 0, width: WIN_COLS, height: WIN_ROWS }]);
 });

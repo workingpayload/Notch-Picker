@@ -35,13 +35,7 @@
         </label>
         <label class="number">
           <span><b>Pet</b><small>With one pet for everything.</small></span>
-          <select name="petSingleSpecies">
-            <option value="cat">Cat</option>
-            <option value="dog">Dog</option>
-            <option value="pig">Pig</option>
-            <option value="sheep">Sheep</option>
-            <option value="goat">Goat</option>
-          </select>
+          <select name="petSingleSpecies" id="single-species"></select>
         </label>
         <label class="number">
           <span><b>Most pets on screen</b><small>Per session; the sessions that most need you get them first. Each pet uses about 25–30 MB.</small></span>
@@ -111,6 +105,54 @@
           <span><b>Chase the mouse</b><small>Now and then, when the cursor is near the surface a pet is on.</small></span>
           <input type="checkbox" name="petChaseCursor" />
         </label>
+        <p class="hint">Double-click a pet on the taskbar to throw it a ball to fetch.</p>
+      </section>
+
+      <section>
+        <h2>Reactions</h2>
+        <label class="toggle">
+          <span><b>Hold up a sign</b><small>When a session needs you, its pet holds up what it's asking. Click the sign to answer: in the notch when the request waits there, otherwise in the terminal.</small></span>
+          <input type="checkbox" name="petSigns" />
+        </label>
+        <label class="toggle">
+          <span><b>Levels and badges</b><small>Pets earn experience as turns finish (more for a finished todo list) and wear a bronze, silver or gold star as they level up.</small></span>
+          <input type="checkbox" name="petLevels" />
+        </label>
+        <small class="note">A pet also does a backflip when its session finishes its todo list, sweats when the context window is nearly full, and limps after several failed tool calls in a row.</small>
+        <div id="levels" role="list" aria-label="Pet levels"></div>
+      </section>
+
+      <section>
+        <h2>Wellbeing</h2>
+        <label class="toggle">
+          <span><b>Stretch breaks</b><small>A pet runs over with a reminder after a long stretch at the computer. Five minutes away from the keyboard counts as a break.</small></span>
+          <input type="checkbox" name="petBreaks" />
+        </label>
+        <label class="number">
+          <span><b>Stretch after</b><small>Minutes at the computer.</small></span>
+          <input type="number" name="petBreakMinutes" min="15" max="180" step="5" />
+        </label>
+        <label class="toggle">
+          <span><b>Water breaks</b><small>A reminder to drink some water now and then.</small></span>
+          <input type="checkbox" name="petWater" />
+        </label>
+        <label class="number">
+          <span><b>Water every</b><small>Minutes at the computer.</small></span>
+          <input type="number" name="petWaterMinutes" min="15" max="240" step="5" />
+        </label>
+        <label class="toggle">
+          <span><b>Sleep at night</b><small>Pets sleep through these hours, waking only when a session needs you.</small></span>
+          <input type="checkbox" name="petNightSleep" />
+        </label>
+        <label class="number">
+          <span><b>Night from</b><small>Hour (0–23).</small></span>
+          <input type="number" name="petNightFrom" min="0" max="23" step="1" />
+        </label>
+        <label class="number">
+          <span><b>Until</b><small>Hour (0–23).</small></span>
+          <input type="number" name="petNightTo" min="0" max="23" step="1" />
+        </label>
+        <small class="note">Click a pet to dismiss its reminder. Reminders also show as notifications (not during Focus Assist).</small>
       </section>
 
       <section>
@@ -118,17 +160,12 @@
         <label class="toggle">
           <span>
             <b>Pet sounds</b>
-            <small>A meow, woof, oink or baa when a pet's session needs you and when you pet it. Only with the notch's Sound on, and not during Focus Assist.</small>
+            <small>A meow, woof, oink, baa, quack or beep when a pet's session needs you and when you pet it. Only with the notch's Sound on, and not during Focus Assist.</small>
           </span>
           <input type="checkbox" name="petSounds" />
         </label>
-        <div class="row-actions sound-tests">
+        <div class="row-actions sound-tests" id="sound-tests">
           <span>Listen:</span>
-          <button type="button" data-species="cat">Cat</button>
-          <button type="button" data-species="dog">Dog</button>
-          <button type="button" data-species="pig">Pig</button>
-          <button type="button" data-species="sheep">Sheep</button>
-          <button type="button" data-species="goat">Goat</button>
         </div>
       </section>
 

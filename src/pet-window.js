@@ -2,8 +2,9 @@
 
 const path = require('path');
 const { BrowserWindow, screen } = require('electron');
-const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors } = require('./pet');
-const { SPRITE_W, SPRITE_H, WIN_COLS, WIN_ROWS, SPECIES, COLLAR_COLORS, hitRects, petCell } = require('./pet-sprites');
+const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors, petSign, petStrain, stepBall } = require('./pet');
+const { SPRITE_W, SPRITE_H, WIN_COLS, WIN_ROWS, SPECIES, COLLAR_COLORS, BALL, hitRects, petCell } = require('./pet-sprites');
+const { isNight } = require('./wellbeing');
 
 // Speed and activity settings.
 const SPEED = { lazy: 0.6, normal: 1, zippy: 1.6 };
@@ -39,6 +40,15 @@ const CHASE_PLAY_MS = 4500;
 // have no touch screens).
 const USE_SHAPE = process.platform !== 'darwin';
 const PET_TITLE = 'Notch Picker pet';
+// Two taps on a pet this close together throw a ball for it to fetch.
+const DOUBLE_TAP_MS = 400;
+// A dropped ball lies there this long before it disappears.
+const BALL_LINGER_MS = 4000;
+// The sign a pet holds up (DIPs): its board's bottom sits this many sprite rows into the pet's box,
+// above the head; the text is drawn by the renderer in this font size.
+const SIGN_BOTTOM_ROW = 4;
+const SIGN_FONT = 11;
+const SIGN_PAD = 6;
 
 const windowOptions = (webPreferences, title) => ({
   frame: false,
@@ -78,6 +88,9 @@ class Pet {
     this.mood = 'none';
     this.title = '';
     this.collar = null;
+    this.sign = null; // what it holds up while its session needs you
+    this.strain = { sweat: false, limp: false };
+    this.lastTapAt = 0;
     this.rank = 0; // order among pets for spots on the notch (most urgent session first)
     this.win = null;
     this.ready = false;
@@ -161,7 +174,7 @@ class Pet {
     this.schedule(0);
   }
 
-  update({ mood, title, collar, species, rank }) {
+  update({ mood, title, collar, species, rank, sign = null, strain = null }) {
     if (mood === 'alert' && this.mood !== 'alert' && this.updated) this.m.sound(this, 'alert');
     this.updated = true;
     this.mood = mood;
@@ -169,6 +182,43 @@ class Pet {
     this.collar = collar || null;
     this.species = species;
     this.rank = rank;
+    this.sign = sign;
+    this.strain = strain || { sweat: false, limp: false };
+  }
+
+  // The sign's board (DIPs), sized for its text, or null.
+  signSize(sign) {
+    if (!sign) return null;
+    const chars = Math.max(sign.title.length, sign.text.length);
+    const lines = sign.text ? 2 : 1;
+    return {
+      width: Math.round(Math.min(220, Math.max(90, SIGN_PAD * 2 + chars * SIGN_FONT * 0.56))),
+      height: Math.round(SIGN_PAD + lines * (SIGN_FONT + 3) + 2),
+    };
+  }
+
+  // This pet's window: the shared size, made wider and taller while it holds up a sign.
+  size(sign = this.view && this.view.sign) {
+    const base = this.m.size();
+    const board = this.signSize(sign);
+    if (!board) return base;
+    const boxHeight = this.m.boxSize().height;
+    const above = Math.max(0, board.height - SIGN_BOTTOM_ROW * this.m.cell()) + 2;
+    return { width: Math.max(base.width, board.width + 4), height: Math.max(base.height, boxHeight + above) };
+  }
+
+  // Where the sign's board is in the window (DIPs).
+  signRect(sign, size) {
+    const board = this.signSize(sign);
+    if (!board) return null;
+    const boxTop = size.height - this.m.boxSize().height;
+    return { x: Math.round((size.width - board.width) / 2), y: Math.round(boxTop + SIGN_BOTTOM_ROW * this.m.cell() - board.height), ...board };
+  }
+
+  // The species' level and badge for the renderer (none with levels off).
+  levelPayload(values) {
+    const info = values.petLevels ? this.m.badgeFor(this.species) : null;
+    return { badge: info ? info.tier : null, level: info ? info.level : 0 };
   }
 
   // Screen rectangle of the pet's sprite, for hover and click hit-testing.
@@ -210,8 +260,14 @@ class Pet {
         const { vx, vy } = this.fling(now);
         this.brain.release(vx, vy);
       } else if (this.press && phase === 'up' && !this.m.onActivate(this.sessionId)) {
-        this.brain.pet(now);
-        this.m.sound(this, 'pet');
+        // A second tap right after the first throws a ball to fetch; otherwise it's a pat (which
+        // also dismisses a water or stretch reminder).
+        if (now - this.lastTapAt < DOUBLE_TAP_MS && this.m.throwBall(this, now)) this.lastTapAt = 0;
+        else {
+          this.brain.pet(now);
+          this.m.sound(this, 'pet');
+          this.lastTapAt = now;
+        }
       }
       if (type !== 'mouse') this.touchPark = cursor;
       this.press = null;
@@ -235,11 +291,14 @@ class Pet {
   // moment after the pet moves to a display with different scaling.
   applyShape(w, view, now = 0) {
     const cell = this.m.cell();
-    const { width, height } = this.m.size();
+    const size = this.size(view.sign);
+    const { width, height } = size;
     const box = this.m.boxSize();
     const ox = (width - box.width) / 2;
     const oy = height - box.height;
     const rects = hitRects(view).map((r) => ({ x: ox + r.x * cell, y: oy + r.y * cell, width: r.width * cell, height: r.height * cell }));
+    const sign = this.signRect(view.sign, size);
+    if (sign) rects.push(sign);
     const key = JSON.stringify(rects);
     if (key === this.lastShape && now >= this.reshapeUntil) return;
     this.lastShape = key;
@@ -334,13 +393,17 @@ class Pet {
       speed: SPEED[values.petSpeed] || 1,
       activity: values.petActivity,
       reducedMotion: this.m.reducedMotion,
+      strain: this.strain,
+      sign: values.petSigns ? this.sign : null,
+      ball: this.m.ballFor(this),
     });
     this.view = view;
     if (values.petPlay) this.m.bump(this, now);
 
     // The window is at least the pet's box; the box sits at its bottom-centre (the pet's feet at
-    // the window's bottom edge).
-    const { width, height } = this.m.size();
+    // the window's bottom edge). Holding up a sign makes it wider and taller.
+    const size = this.size(view.sign);
+    const { width, height } = size;
     const winBox = { x: Math.round(view.x - width / 2), y: Math.round(view.y - height), width, height };
     const petBox = this.m.boxSize();
     const box = { x: Math.round(view.x - petBox.width / 2), y: Math.round(view.y - petBox.height), ...petBox };
@@ -355,6 +418,11 @@ class Pet {
       title: this.title,
       cell,
       held: !!this.held,
+      effect: view.effect,
+      carry: view.carry,
+      sweat: view.sweat,
+      sign: view.sign ? { ...view.sign, ...this.signRect(view.sign, size), font: SIGN_FONT } : null,
+      ...this.levelPayload(values),
     };
 
     // Hand the pet back to its window when nothing holds it and it isn't flying: right away after
@@ -428,14 +496,26 @@ class Pet {
 // Owns the desktop pets: either one pet that follows the most urgent session, or one per session
 // (up to a maximum), each reacting to its own session. Also owns the carry overlay they share.
 class PetManager {
-  constructor({ webPreferences, getSettings, getPerchRect, onActivate = () => false, onWindowCreated = () => {}, isQuiet = () => false }) {
+  constructor({
+    webPreferences,
+    getSettings,
+    getPerchRect,
+    onActivate = () => false,
+    onSign = () => {},
+    getBadge = () => null,
+    onWindowCreated = () => {},
+    isQuiet = () => false,
+  }) {
     // Pet sounds play without a click in that window first.
     this.webPreferences = { ...webPreferences, autoplayPolicy: 'no-user-gesture-required' };
     this.isQuiet = isQuiet;
     this.getSettings = getSettings;
     this.getPerchRect = getPerchRect;
     this.onActivate = onActivate;
+    this.onSign = onSign;
+    this.getBadge = getBadge;
     this.onWindowCreated = onWindowCreated;
+    this.ball = null; // the fetch ball: { win, ready, owner, state, ground, phase, dropAt, lastTick, timer }
     this.pets = new Map(); // key ('single' or a session id) -> Pet
     this.leaving = new Set(); // pets walking off screen
     this.sessions = [];
@@ -472,6 +552,7 @@ class PetManager {
   windows() {
     const wins = this.all().filter((p) => p.alive()).map((p) => p.win);
     if (this.carry && !this.carry.win.isDestroyed()) wins.push(this.carry.win);
+    if (this.ball && !this.ball.win.isDestroyed()) wins.push(this.ball.win);
     return wins;
   }
 
@@ -506,13 +587,25 @@ class PetManager {
     this.sessions = sessions;
     const values = this.getSettings();
     if (!values.pet) return;
+    // At night pets sleep, waking only when a session needs you.
+    const night = values.petNightSleep && isNight(new Date(), values.petNightFrom, values.petNightTo);
+    const atNight = (mood) => (night && mood !== 'alert' ? 'asleep' : mood);
     if (values.petMode === 'single') {
       let pet = this.pets.get('single');
       if (!pet) {
         pet = new Pet(this, { key: 'single', species: values.petSingleSpecies });
         this.pets.set('single', pet);
       }
-      pet.update({ mood: petMood(sessions), title: '', collar: null, species: values.petSingleSpecies, rank: 0 });
+      const top = sessions.find((s) => !s.muted) || null;
+      pet.update({
+        mood: atNight(petMood(sessions)),
+        title: '',
+        collar: null,
+        species: values.petSingleSpecies,
+        rank: 0,
+        sign: petSign(sessions.find((s) => petSign(s))),
+        strain: petStrain(top),
+      });
       return;
     }
     const withPets = new Set(this.pets.keys());
@@ -531,11 +624,13 @@ class PetManager {
         this.pets.set(s.id, pet);
       }
       pet.update({
-        mood: sessionMood(s),
+        mood: atNight(sessionMood(s)),
         title: s.name,
         collar: COLLAR_COLORS[s.tag] || null,
         species: this.speciesFor(s.id),
         rank: sessions.indexOf(s),
+        sign: petSign(s),
+        strain: petStrain(s),
       });
     }
   }
@@ -576,6 +671,7 @@ class PetManager {
     if (this.carry && !this.carry.win.isDestroyed()) this.carry.win.destroy();
     this.carry = null;
     this.carrier = null;
+    this.removeBall();
   }
 
   // Done or error in a session (single mode: in any session).
@@ -587,6 +683,56 @@ class PetManager {
   startle(sessionId) {
     const p = this.pets.get(this.pets.has('single') ? 'single' : sessionId);
     if (p) p.brain.startle(Date.now());
+  }
+
+  // The species of the pet following a session (single mode: the one pet), or null.
+  speciesOfSession(sessionId) {
+    const p = this.pets.get(this.pets.has('single') ? 'single' : sessionId);
+    return p ? p.species : null;
+  }
+
+  // "Throw a ball" from a pet's menu.
+  throwFrom(win) {
+    const p = this.all().find((x) => x.win === win);
+    return !!p && this.throwBall(p, Date.now());
+  }
+
+  // A session finished its todo list: its pet (single mode: the pet) does a backflip.
+  party(sessionId) {
+    const p = this.pets.get(this.pets.has('single') ? 'single' : sessionId);
+    if (!p) return;
+    p.brain.party(Date.now());
+    p.schedule(0);
+  }
+
+  // A species reached a new level: its pets hop with a star.
+  levelUp(species) {
+    for (const p of this.pets.values()) {
+      if (p.species !== species) continue;
+      p.brain.levelUp(Date.now());
+      p.schedule(0);
+    }
+  }
+
+  // A wellbeing reminder ('water' or 'stretch'): one pet (the most urgent session's) runs over
+  // and shows it until clicked. Returns whether a pet is there to do it.
+  nudge(kind) {
+    const p = [...this.pets.values()].filter((x) => x.alive() && x.ready).sort((a, b) => a.rank - b.rank)[0];
+    if (!p) return false;
+    p.brain.nudge(Date.now(), kind);
+    p.schedule(0);
+    return true;
+  }
+
+  // The level badge for a species' pets: { tier: 'bronze' | 'silver' | 'gold' | null, level } or null.
+  badgeFor(species) {
+    return this.getBadge(species);
+  }
+
+  // The sign a pet holds up was clicked: answer that session's request.
+  signClicked(webContents) {
+    const p = this.petFor(webContents);
+    if (p) this.onSign(p.sessionId);
   }
 
   pointer(webContents, phase, type, point) {
@@ -774,6 +920,123 @@ class PetManager {
     const half = (SPRITE_W * cell) / 2;
     const b = display.bounds;
     return { x: Math.min(Math.max(x, b.x + half), b.x + b.width - half), y: rect.y + rect.height - 2 * cell + SPRITE_H * cell };
+  }
+
+  // ---- Fetch ball (double-click a pet) ----
+
+  // The ball's window: square, never smaller than Windows allows; the ball sits at its bottom-centre.
+  ballSize() {
+    const side = Math.max(MIN_WINDOW, BALL.length * this.cell(), this.grown.width, this.grown.height);
+    return { width: side, height: side };
+  }
+
+  ballBounds(state, size) {
+    return { x: Math.round(state.x - size.width / 2), y: Math.round(state.y - size.height), ...size };
+  }
+
+  // Throws a ball for a pet to fetch: towards the farther end of its taskbar. Only one ball at a
+  // time, and only for a pet standing on the taskbar. Returns whether it threw one.
+  throwBall(pet, now) {
+    if (this.ball || !pet.view || this.reducedMotion || !pet.brain.fetch(now)) return false;
+    const cell = this.cell();
+    const display = screen.getDisplayNearestPoint({ x: Math.round(pet.view.x), y: Math.round(pet.view.y - 1) });
+    const ground = this.ground(display);
+    const dir = pet.view.x - ground.left > ground.right - pet.view.x ? -1 : 1;
+    const state = {
+      x: pet.view.x + dir * 6 * cell,
+      y: pet.view.y - 8 * cell,
+      vx: dir * (450 + Math.random() * 350),
+      vy: -(500 + Math.random() * 300),
+      resting: false,
+    };
+    const size = this.ballSize();
+    const win = new BrowserWindow({ ...windowOptions(this.webPreferences, 'Notch Picker ball'), ...this.ballBounds(state, size) });
+    this.setup(win);
+    win.setIgnoreMouseEvents(true);
+    if (USE_SHAPE) {
+      const side = BALL.length * cell;
+      win.setShape([{ x: Math.round((size.width - side) / 2), y: size.height - side, width: side, height: side }]);
+    }
+    win.loadFile(path.join(__dirname, 'renderer', 'pet.html'));
+    const ball = { win, ready: false, owner: pet, state, ground, phase: 'flying', dropAt: 0, lastTick: now, lastBounds: '', displayId: display.id, timer: null };
+    win.once('ready-to-show', () => {
+      win.setTitle('Notch Picker ball');
+      ball.ready = true;
+      win.webContents.send('pet:view', { ball: true, cell });
+    });
+    win.on('closed', () => {
+      if (this.ball === ball) this.removeBall();
+    });
+    this.ball = ball;
+    this.onWindowCreated(win);
+    ball.timer = setInterval(() => this.tickBall(), FAST_TICK_MS);
+    pet.schedule(0);
+    return true;
+  }
+
+  // The ball as the fetching pet sees it, while it's there to be picked up.
+  ballFor(pet) {
+    const b = this.ball;
+    if (!b || b.owner !== pet || (b.phase !== 'flying' && b.phase !== 'resting')) return null;
+    return { x: b.state.x, resting: b.state.resting };
+  }
+
+  // Flies and rolls the ball; hides it while the pet carries it, puts it down where the pet lets
+  // go, and clears it away a few seconds after that.
+  tickBall() {
+    const b = this.ball;
+    if (!b) return;
+    if (!b.owner.alive() || b.win.isDestroyed()) {
+      this.removeBall();
+      return;
+    }
+    const now = Date.now();
+    const dt = Math.min(0.05, Math.max(0, (now - b.lastTick) / 1000));
+    b.lastTick = now;
+    const v = b.owner.view;
+    const carried = !!v && v.carry === 'ball';
+    if (b.phase === 'flying' || b.phase === 'resting') {
+      if (carried) b.phase = 'carried';
+      else if (!b.owner.brain.isFetching()) {
+        // The pet was called away (a session needs you, it was picked up): the ball stays put.
+        b.phase = 'dropped';
+        b.dropAt = now;
+      } else {
+        b.state = stepBall(b.state, dt, b.ground);
+        if (b.state.resting) b.phase = 'resting';
+      }
+    } else if (b.phase === 'carried' && !carried) {
+      const x = v ? v.x + v.facing * 6 * this.cell() : b.state.x;
+      b.state = { x: Math.min(b.ground.right, Math.max(b.ground.left, x)), y: b.ground.y, vx: 0, vy: 0, resting: true };
+      b.phase = 'dropped';
+      b.dropAt = now;
+    }
+    if (b.phase === 'dropped' && now - b.dropAt > BALL_LINGER_MS) {
+      this.removeBall();
+      return;
+    }
+    if (!b.ready) return;
+    const visible = b.phase !== 'carried' && !this.hiddenDisplays.has(b.displayId);
+    if (visible) {
+      const bounds = this.ballBounds(b.state, this.ballSize());
+      const key = JSON.stringify(bounds);
+      if (key !== b.lastBounds) {
+        b.lastBounds = key;
+        b.win.setBounds(bounds);
+      }
+      if (!b.win.isVisible()) {
+        b.win.showInactive();
+        b.win.setAlwaysOnTop(true, 'screen-saver');
+      }
+    } else if (b.win.isVisible()) b.win.hide();
+  }
+
+  removeBall() {
+    const b = this.ball;
+    if (!b) return;
+    this.ball = null;
+    clearInterval(b.timer);
+    if (!b.win.isDestroyed()) b.win.destroy();
   }
 
   // ---- Carry overlay (finger/pen drags) ----

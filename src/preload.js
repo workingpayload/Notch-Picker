@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('notchApi', {
   onPinned: (cb) => ipcRenderer.on('notch:pinned', (_e, pinned) => cb(pinned)),
   onKeyboard: (cb) => ipcRenderer.on('notch:keyboard', (_e, active) => cb(active)),
   onAnnounce: (cb) => ipcRenderer.on('notch:announce', (_e, t) => cb(t)),
+  // A pet's sign was clicked: open the panel at that session's card.
+  onFocusSession: (cb) => ipcRenderer.on('notch:focus-session', (_e, id) => cb(id)),
   togglePin: () => ipcRenderer.send('notch:toggle-pin'),
   drag: (phase) => ipcRenderer.send('notch:drag', phase),
   // Island extras: now playing, quick timer, file shelf.
@@ -59,6 +61,8 @@ contextBridge.exposeInMainWorld('notchApi', {
   getPetSessions: () => ipcRenderer.invoke('pets:sessions'),
   onPetSessions: (cb) => ipcRenderer.on('pets:sessions', (_e, list) => cb(list)),
   setPetSpecies: (sessionId, species) => ipcRenderer.send('pets:set-species', sessionId, species),
+  getPetLevels: () => ipcRenderer.invoke('pets:levels'),
+  onPetLevels: (cb) => ipcRenderer.on('pets:levels', (_e, levels) => cb(levels)),
 });
 
 // Desktop pet windows (src/renderer/pet.html).
@@ -69,4 +73,5 @@ contextBridge.exposeInMainWorld('petApi', {
   menu: () => ipcRenderer.send('pet:menu'),
   ready: (info) => ipcRenderer.send('pet:ready', info),
   painted: () => ipcRenderer.send('pet:painted'),
+  sign: () => ipcRenderer.send('pet:sign'),
 });

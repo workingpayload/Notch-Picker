@@ -58,6 +58,19 @@ const SCHEMA = {
   petSounds: { type: 'boolean', default: false },
   petColor: { type: 'enum', values: ['orange', 'grey', 'black', 'white'], default: 'orange' },
   petChaseCursor: { type: 'boolean', default: true },
+  // A pet whose session needs you holds up a sign with the request; click it to answer.
+  petSigns: { type: 'boolean', default: true },
+  // Level badges earned from finished turns and todo lists.
+  petLevels: { type: 'boolean', default: true },
+  // Wellbeing (with pets on): stretch after a long stretch at the computer, sip water now and then.
+  petBreaks: { type: 'boolean', default: true },
+  petBreakMinutes: { type: 'number', default: 50, min: 15, max: 180, integer: true },
+  petWater: { type: 'boolean', default: true },
+  petWaterMinutes: { type: 'number', default: 60, min: 15, max: 240, integer: true },
+  // Pets sleep through the night (local hours), waking only when a session needs you.
+  petNightSleep: { type: 'boolean', default: true },
+  petNightFrom: { type: 'number', default: 23, min: 0, max: 23, integer: true },
+  petNightTo: { type: 'number', default: 7, min: 0, max: 23, integer: true },
   notifications: { type: 'boolean', default: true },
   notifyDelaySeconds: { type: 'number', default: 5, min: 0, max: 600 },
   notifyOnDone: { type: 'boolean', default: false },

@@ -65,3 +65,58 @@
   display: block;
   padding: 2px 0 8px;
 }
+
+.hint,
+.note {
+  display: block;
+  margin: 6px 0 4px;
+  color: #8e8e93;
+  font-size: 11.5px;
+}
+
+#levels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 12px;
+  padding: 6px 0 4px;
+}
+
+.level-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+}
+
+.level-row b {
+  font-weight: 600;
+}
+
+.level-row .tier {
+  margin-left: 4px;
+}
+
+.level-row .tier.bronze {
+  color: #d08a4a;
+}
+
+.level-row .tier.silver {
+  color: #d6dde5;
+}
+
+.level-row .tier.gold {
+  color: #ffd60a;
+}
+
+.level-row .bar {
+  height: 4px;
+  border-radius: 2px;
+  background: #3a3a3c;
+  overflow: hidden;
+}
+
+.level-row .bar i {
+  display: block;
+  height: 100%;
+  background: #0a84ff;
+}

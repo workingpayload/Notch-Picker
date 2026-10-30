@@ -94,28 +94,38 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 
 ## Desktop pets (off by default)
 
-Turn on *Desktop pets* in the tray menu or *Settings → Desktop pets* for small pixel-art pets that react to your sessions: a **cat**, **dog**, **pig**, **sheep** or **goat**. Everything about them is in **Pet settings…** (tray menu, a pet's right-click menu, *Settings → Desktop pets*, or `npm start -- --pets`): a live preview of the five species at the chosen size and cat colour, and:
+Turn on *Desktop pets* in the tray menu or *Settings → Desktop pets* for small pixel-art pets that react to your sessions: a **cat**, **dog**, **pig**, **sheep**, **goat**, **duck**, **bunny**, **fox** or **robot**. Everything about them is in **Pet settings…** (tray menu, a pet's right-click menu, *Settings → Desktop pets*, or `npm start -- --pets`): a live preview of every species at the chosen size and cat colour, and:
 
 - **Size:** *Match the notch* (default) or *Tiny* to *Huge*, independent of the notch.
 - **Speed:** *Lazy*, *Normal* or *Zippy* walking, running and climbing.
 - **Activity:** *Calm*, *Normal* or *Playful*: how often they roam and play, and how soon they nap when idle.
-- **Pet sounds** (off by default): a meow, woof, oink, baa or bleat when a pet's session needs you and when you pet it, made on the fly (no sound files). They need the notch's *Sound* setting on and stay quiet during Focus Assist. *Listen* buttons play each one.
+- **Pet sounds** (off by default): a meow, woof, oink, baa, bleat, quack, squeak, yip or beep when a pet's session needs you and when you pet it, made on the fly (no sound files). They need the notch's *Sound* setting on and stay quiet during Focus Assist. *Listen* buttons play each one.
+- **Levels:** each species' level and progress to the next.
 - **Session pets:** every live session with its colour tag and a species picker (*Automatic* or a fixed species), plus which sessions have no pet because of the limit, or are asleep because they're muted.
 
 - **One pet, or one per session:** *One pet for everything* (default) follows the most urgent session; pick its species in Settings or its menu. *One pet per session* gives each live session its own pet, up to *Most pets on screen* (5 by default, about 25–30 MB each); the sessions that most need you get pets first, and a session keeps its pet unless one that needs you turns up.
-  - New sessions take the next species in turn (cat, dog, pig, sheep, goat). Change one with *Pet* in the session's ⋯ menu or the pet's own menu; the choice is remembered for that session.
+  - New sessions take the next species in turn (cat, dog, pig, sheep, goat, duck, bunny, fox, robot). Change one with *Pet* in the session's ⋯ menu or the pet's own menu; the choice is remembered for that session.
   - A session's pet wears its **colour tag as a collar**, shows the **session's name on hover**, **sleeps while the session is muted**, and **walks off screen** when the session ends.
 - **Mood:** a pet naps (💤) when its session (or everything) is idle, wanders and thinks (…) while Copilot works, and stands up with a **!** when a session needs approval or your answer. It hops with a ♪ when a turn finishes and jumps in fright on an error. Muted sessions don't affect the single pet.
+- **Reactions to the work:**
+  - **Sign board** (on by default): on the taskbar, a pet whose session needs you holds up a sign with the request (e.g. *Approve shell · npm test*) instead of the **!**. Click the sign to answer: when the request waits in the notch (*Approve & answer from the notch*), the panel opens at that session's card; otherwise its terminal comes to the front. Hanging from the notch, it shows the **!** (the pill above shows the request).
+  - **Backflip with confetti** when its session finishes its todo list.
+  - **Sweating** when the session's context window is over 85% full, and **limping** (slower, no climbing) after three failed tool calls in a row or while the session shows an error.
+- **Levels and badges** (on by default): pets earn experience for their species as turns finish (1) and todo lists get done (5), kept across restarts in `pet-stats.json` in the settings folder. Levels need 5, 15, 30, 50… experience; a pet wears a **bronze** star from level 2, **silver** from 5 and **gold** from 10, hops with a ★ when it levels up, and shows its level on hover and in its menu.
+- **Fetch:** double-click a pet on the taskbar (or *Throw a ball* in its menu) to throw a ball towards the far end of the taskbar. The pet runs after it, picks it up once it stops rolling, brings it back and drops it. A session that needs you calls it away.
+- **Wellbeing** (with pets on):
+  - **Stretch breaks** (on, after 50 minutes) and **water breaks** (on, every 60 minutes): a pet runs over below the cursor with a 🙆 or 💧 bubble and a notification appears (not during Focus Assist). Click the pet to dismiss it. Only time at the computer counts: five minutes without keyboard or mouse input is a break and resets the stretch timer (20 minutes resets the water timer).
+  - **Sleep at night** (on, 23:00–07:00): pets sleep through these hours, waking only when a session needs you.
 - **Lives on:** *the taskbar* (walks along its top edge), *the notch* (hangs from the pill, even the compact dot), or *both* (default): pets stay on the taskbar and leap up to the notch when their session needs you, then drop back down. Several pets hang side by side along the pill, most urgent first; one that doesn't fit stays on the taskbar.
 - **Roam the screen** (on by default): pets don't just walk the taskbar. They climb the screen's left and right edges, cling for a moment and let go; hop up onto app windows within reach and walk along their tops (riding along if you drag the window), and fall off the ends to whatever is below. Only the visible part of a window's top counts: maximized windows and windows in front hide the ones behind. They roam while idle or working, nap after a minute of idleness, and stay put (or leap to the notch) when their session needs you. Turn it off to keep them on the taskbar.
 - **Play together** (on by default, with a pet per session): pets on the same surface now and then walk up to each other and swap hearts, play chase, or one curls up next to a sleeping one. A pet that falls or is tossed into another knocks it flying, and one that lands on another's head sits there and rides along.
-- **Click a pet** while it shows **!** to bring that session's terminal to the front. Otherwise click or hover to pet it (it purrs with hearts).
+- **Click a pet** while it shows **!** to bring that session's terminal to the front. Otherwise click or hover to pet it (it purrs with hearts); a second click right after throws the ball.
 - **Drag it** anywhere; let go and it falls back down. Toss it and it flies.
 - **Touch screens and pens:** tap a pet to pet it (or, while it shows **!**, to open that terminal), rest a finger on it and it purrs, drag it with a finger, and press and hold for its menu. Only the pet itself takes clicks and touches; the rest of its little window passes them through to what's underneath.
 - **Chase the mouse:** now and then a pet runs after the cursor when it's near the surface the pet is on. You can turn this off.
-- **Right-click a pet** for *Open terminal* and *Pet* (species), *Pets* (one or per session), *Lives on*, *Cat colour* (orange tabby, grey, black, white), *Roam the screen*, *Play together*, *Chase the mouse*, *Pet settings…* and *Hide pets*.
+- **Right-click a pet** for *Open terminal*, *Pet* (species), *Throw a ball*, *Pets* (one or per session), *Lives on*, *Cat colour* (orange tabby, grey, black, white), *Roam the screen*, *Play together*, *Chase the mouse*, *Pet settings…* and *Hide pets*.
 
-Pets follow the notch's size preset, hide with full-screen apps, are hidden from screen sharing with the notch, and stay still with *reduce motion*. The sprites are drawn in code (`src/pet-sprites.js`); the behaviour is in `src/pet.js` and the windows in `src/pet-window.js`.
+Pets follow the notch's size preset, hide with full-screen apps, are hidden from screen sharing with the notch, and stay still with *reduce motion* (no fetch then). The sprites are drawn in code (`src/pet-sprites.js`); the behaviour is in `src/pet.js`, the windows (and the fetch ball) in `src/pet-window.js`, levels in `src/pet-stats.js` and the break reminders in `src/wellbeing.js`.
 
 ## Accessibility
 

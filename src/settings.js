@@ -41,7 +41,7 @@ const SCHEMA = {
   hideInFullscreen: { type: 'boolean', default: true },
   muteInFocusAssist: { type: 'boolean', default: true },
   hideFromScreenCapture: { type: 'boolean', default: true },
-  pet: { type: 'boolean', default: false },
+  pet: { type: 'boolean', default: true },
   // 'single': one pet follows the most urgent session; 'perSession': a pet for each session.
   petMode: { type: 'enum', values: ['single', 'perSession'], default: 'single' },
   petMax: { type: 'number', default: 5, min: 1, max: 10, integer: true },

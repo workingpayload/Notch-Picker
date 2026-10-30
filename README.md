@@ -93,9 +93,9 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 - **Battery banners:** when charging starts, and when the battery drops to 20%, 10% and 5%.
 - Playing media and a running timer count as activity for *Compact when idle* and *Auto-hide when idle*.
 
-## Desktop pets (off by default)
+## Desktop pets (on by default)
 
-Turn on *Desktop pets* in the tray menu or *Settings → Desktop pets* for small pixel-art pets that react to your sessions: a **cat**, **dog**, **pig**, **sheep**, **goat**, **duck**, **bunny**, **fox** or **robot**. Everything about them is in **Pet settings…** (tray menu, a pet's right-click menu, *Settings → Desktop pets*, or `npm start -- --pets`): a live preview of every species at the chosen size and cat colour, and:
+Small pixel-art pets react to your sessions: a **cat**, **dog**, **pig**, **sheep**, **goat**, **duck**, **bunny**, **fox** or **robot**. Turn them off with *Desktop pets* in the tray menu, *Settings → Desktop pets* or *Hide pets* in a pet's menu. Everything about them is in **Pet settings…** (tray menu, a pet's right-click menu, *Settings → Desktop pets*, or `npm start -- --pets`): a live preview of every species at the chosen size and cat colour, and:
 
 - **Size:** *Match the notch* (default) or *Tiny* to *Huge*, independent of the notch.
 - **Speed:** *Lazy*, *Normal* or *Zippy* walking, running and climbing.

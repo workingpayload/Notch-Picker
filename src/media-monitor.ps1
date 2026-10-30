@@ -4,7 +4,7 @@
 #             "pos":61000,"dur":215000,"at":1730281234567,"prev":true,"next":true,"toggle":true},"art":"data:image/png;base64,..."}
 #   {"media":null}                 (nothing is playing)
 #   {"unsupported":true}           (this Windows has no media session API; the helper exits)
-# "art" is only included when the cover changed (null: no cover). pos/dur/at are milliseconds
+# "art" is sent when the cover changes (null: no cover yet for this track). pos/dur/at are milliseconds
 # (at = when the app last reported the position, Unix time).
 # Reads commands on stdin: "toggle", "next", "prev". EOF means the app went away.
 param([int]$IntervalMs = 1000, [int]$ParentPid = 0)
@@ -76,8 +76,15 @@ $statusNames = @{ 0 = 'stopped'; 1 = 'stopped'; 2 = 'changing'; 3 = 'stopped'; 4
 $epoch = [DateTimeOffset]::FromUnixTimeMilliseconds(0)
 $last = $null
 $lastTrack = $null
-$coverSent = $false
-$coverTries = 0
+$lastCover = $null
+$trackSince = 0
+$coverCheckedAt = 0
+# Apps often publish the new title before the new artwork (or keep showing the previous track's
+# artwork until the new one has downloaded), so the cover is re-read on every tick for a while after
+# a track change, then every few seconds, and sent whenever it actually changes.
+$CoverSettleMs = 12000
+$CoverRecheckMs = 5000
+$clock = [Diagnostics.Stopwatch]::StartNew()
 
 function Write-Media {
   $session = $null
@@ -111,29 +118,32 @@ function Write-Media {
     toggle = [bool]($info.Controls.IsPlayPauseToggleEnabled -or $info.Controls.IsPlayEnabled -or $info.Controls.IsPauseEnabled)
   }
   $line = ConvertTo-AsciiJson $media
-  # The cover is read (and sent) when the track changes, and again while the app hasn't published
-  # it yet (browsers set it after downloading the artwork): a few tries per track.
   $track = "$($media.app)|$($media.title)|$($media.artist)|$($media.album)"
+  $now = $clock.ElapsedMilliseconds
   $sendArt = $false
-  $cover = $null
   if ($track -cne $script:lastTrack) {
     $script:lastTrack = $track
-    $script:coverSent = $false
-    $script:coverTries = 0
-    $sendArt = $true
+    $script:trackSince = $now
+    $script:coverCheckedAt = 0
+    # The previous track's cover must not linger: clear it until this track's cover is read.
+    if ($null -ne $script:lastCover) {
+      $script:lastCover = $null
+      $sendArt = $true
+    }
   }
-  if ($props -and $props.Thumbnail -and -not $script:coverSent -and $script:coverTries -lt 5) {
-    $script:coverTries++
+  $settling = $now - $script:trackSince -lt $CoverSettleMs
+  if ($props -and $props.Thumbnail -and ($settling -or $now - $script:coverCheckedAt -ge $CoverRecheckMs)) {
+    $script:coverCheckedAt = $now
     $cover = Get-Cover $props
-    if ($cover) {
-      $script:coverSent = $true
+    if ($cover -and $cover -cne $script:lastCover) {
+      $script:lastCover = $cover
       $sendArt = $true
     }
   }
   if ($line -ceq $script:last -and -not $sendArt) { return }
   $script:last = $line
   $out = '{"media":' + $line
-  if ($sendArt) { $out += ',"art":' + $(if ($cover) { '"' + $cover + '"' } else { 'null' }) }
+  if ($sendArt) { $out += ',"art":' + $(if ($script:lastCover) { '"' + $script:lastCover + '"' } else { 'null' }) }
   [Console]::Out.WriteLine($out + '}')
   [Console]::Out.Flush()
 }

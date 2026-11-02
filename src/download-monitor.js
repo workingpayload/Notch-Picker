@@ -13,6 +13,29 @@ const MAX_BODY = 64 * 1024;
 const ACTIVE_SCAN_MS = 1000;
 const IDLE_SCAN_MS = 4000;
 const EXTENSION_ORIGIN_RE = /^(chrome-extension|moz-extension|extension|safari-web-extension):\/\/[\w.-]+$/i;
+const FIREFOX_ID = 'downloads@notch-picker';
+
+// Copies the companion extension from `src` to `dest` for loading unpacked. manifest.json there is
+// for Chrome / Edge / Brave (a background service worker); Firefox can't run extension service
+// workers, so `dest/firefox` gets the same files with a manifest that uses a background script.
+function installExtension(src, dest) {
+  const files = fs.readdirSync(src, { withFileTypes: true }).filter((e) => e.isFile()).map((e) => e.name);
+  const manifest = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
+  const firefox = path.join(dest, 'firefox');
+  fs.mkdirSync(firefox, { recursive: true });
+  for (const name of files) {
+    fs.copyFileSync(path.join(src, name), path.join(dest, name));
+    if (name !== 'manifest.json') fs.copyFileSync(path.join(src, name), path.join(firefox, name));
+  }
+  const { service_worker: worker } = manifest.background || {};
+  const firefoxManifest = {
+    ...manifest,
+    background: { scripts: [worker] },
+    browser_specific_settings: { gecko: { id: FIREFOX_ID, strict_min_version: '121.0' } },
+  };
+  fs.writeFileSync(path.join(firefox, 'manifest.json'), `${JSON.stringify(firefoxManifest, null, 2)}\n`);
+  return dest;
+}
 
 // Local endpoint for the companion browser extension. Only extensions can use it: web pages
 // can't send the X-Notch-Picker header without a CORS preflight, and preflights are only
@@ -284,4 +307,4 @@ class DownloadMonitor extends EventEmitter {
   }
 }
 
-module.exports = { DownloadMonitor, DownloadBridge, BRIDGE_PORTS };
+module.exports = { DownloadMonitor, DownloadBridge, BRIDGE_PORTS, installExtension };

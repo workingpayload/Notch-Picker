@@ -29,7 +29,7 @@ const { SPECIES_NAMES } = require('./pet-sprites');
 const { PetStats, XP, badgeTier } = require('./pet-stats');
 const { Wellbeing } = require('./wellbeing');
 const { MediaMonitor } = require('./media');
-const { DownloadMonitor } = require('./download-monitor');
+const { DownloadMonitor, installExtension } = require('./download-monitor');
 const { QuickTimer, describeDuration, TIMER_PRESETS_MIN } = require('./timer');
 const { Shelf, isOpenable } = require('./shelf');
 const { mediaPlaying, downloadSummary } = require('./island');
@@ -1154,10 +1154,7 @@ function extensionDir() {
 
 function copyExtension() {
   const src = path.join(__dirname, 'browser-extension').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
-  const dest = extensionDir();
-  fs.mkdirSync(dest, { recursive: true });
-  for (const name of fs.readdirSync(src)) fs.copyFileSync(path.join(src, name), path.join(dest, name));
-  return dest;
+  return installExtension(src, extensionDir());
 }
 
 // Keeps an already-installed copy up to date with this version of the app.

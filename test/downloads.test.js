@@ -245,3 +245,28 @@ test('extra download folders must be absolute paths', () => {
   assert.deepEqual(out.downloadFolders, [abs, `${abs}2`]);
   assert.deepEqual(sanitize({ downloadFolders: 42 }).downloadFolders, []);
 });
+
+test('the extension installs with a Chromium manifest and a separate Firefox one', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { installExtension } = require('../src/download-monitor');
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'np-ext-'));
+  try {
+    installExtension(path.join(__dirname, '..', 'src', 'browser-extension'), dest);
+    const read = (...p) => JSON.parse(fs.readFileSync(path.join(dest, ...p), 'utf8'));
+    const chromium = read('manifest.json');
+    const firefox = read('firefox', 'manifest.json');
+    assert.deepEqual(chromium.background, { service_worker: 'background.js' });
+    assert.equal('browser_specific_settings' in chromium, false);
+    assert.deepEqual(firefox.background, { scripts: ['background.js'] });
+    assert.equal(firefox.browser_specific_settings.gecko.id, 'downloads@notch-picker');
+    assert.equal(firefox.manifest_version, 3);
+    for (const f of ['background.js', 'icon-16.png', 'icon-48.png', 'icon-128.png']) {
+      assert.ok(fs.existsSync(path.join(dest, f)) && fs.existsSync(path.join(dest, 'firefox', f)), f);
+    }
+    // Installing again over an existing copy (app update) works.
+    installExtension(path.join(__dirname, '..', 'src', 'browser-extension'), dest);
+  } finally {
+    fs.rmSync(dest, { recursive: true, force: true });
+  }
+});

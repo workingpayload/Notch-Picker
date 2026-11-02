@@ -67,6 +67,23 @@ class NotchManager {
     return { x: b.x + r.x, y: b.y + r.y, width: r.width, height: r.height };
   }
 
+  // Where each notch's pill sits, for "hide over tabs": [{ displayId, bounds, pill: { x, width }, zoom }]
+  // in screen DIP. Before its renderer reports the pill, the whole window's width counts.
+  pillAreas() {
+    const displays = screen.getAllDisplays();
+    const zoom = this.zoom();
+    const areas = [];
+    for (const n of this.notches.values()) {
+      if (n.win.isDestroyed()) continue;
+      const display = displays.find((d) => d.id === n.displayId);
+      if (!display) continue;
+      const b = n.win.getBounds();
+      const pill = n.hoverRect ? { x: b.x + n.hoverRect.x, width: n.hoverRect.width } : { x: b.x, width: b.width };
+      areas.push({ displayId: n.displayId, bounds: display.bounds, pill, zoom });
+    }
+    return areas;
+  }
+
   desiredSlots() {
     const mode = this.getSettings().display;
     if (mode === 'all') return new Map(screen.getAllDisplays().map((d) => [`display-${d.id}`, d]));
@@ -219,6 +236,7 @@ class NotchManager {
   }
 
   setHiddenDisplays(ids) {
+    if (ids.size === this.hiddenDisplays.size && [...ids].every((id) => this.hiddenDisplays.has(id))) return;
     this.hiddenDisplays = ids;
     this.applyVisibility();
   }

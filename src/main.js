@@ -17,6 +17,7 @@ const { UsageCollector, aggregate } = require('./usage-stats');
 const { shouldSend, buildPayload, sendWebhook } = require('./webhooks');
 const { NotchManager, sanitizeRect } = require('./notches');
 const { FullscreenMonitor, isQuiet, QUNS } = require('./fullscreen');
+const { tabHiddenDisplayIds } = require('./tab-hide');
 const { GitInfo } = require('./git-info');
 const { renderTrayIcon } = require('./tray-icon');
 const { IdleTracker } = require('./visibility');
@@ -168,11 +169,23 @@ function fullscreenDisplayIds() {
   return ids;
 }
 
+// Displays whose notch should hide: full-screen apps, plus (with "hide over tabs") the display
+// where the foreground browser/terminal/editor has its tabs under the pill, unless a session needs you.
+function notchHiddenDisplayIds() {
+  const ids = fullscreenDisplayIds();
+  const state = fullscreen ? fullscreen.state : null;
+  if (!state || !state.foregroundRect || !settings.get().hideOverTabs) return ids;
+  const rect = process.platform === 'win32' ? screen.screenToDipRect(null, state.foregroundRect) : state.foregroundRect;
+  const attention = latestDecorated.some((s) => !s.muted && (s.status === 'approval' || s.status === 'input'));
+  for (const id of tabHiddenDisplayIds({ app: state.foregroundApp, rect, notches: notches.pillAreas(), attention })) ids.add(id);
+  return ids;
+}
+
 function applySettings(values) {
   const wslChanged = !!(watcher && watcher.wsl) !== followsWsl(values);
   if (watcher && (values.agent !== watcher.agent || wslChanged)) startWatcher(values.agent);
   notches.applySettings(values);
-  notches.setHiddenDisplays(fullscreenDisplayIds());
+  notches.setHiddenDisplays(notchHiddenDisplayIds());
   pet.sync();
   pet.setHiddenDisplays(fullscreenDisplayIds());
   if (fullscreen) fullscreen.setWindowTracking(values.pet && values.petRoam);
@@ -391,6 +404,12 @@ function buildMenu() {
       type: 'checkbox',
       checked: values.hideInFullscreen,
       click: (item) => settings.set({ hideInFullscreen: item.checked }),
+    },
+    {
+      label: 'Hide over browser and app tabs',
+      type: 'checkbox',
+      checked: values.hideOverTabs,
+      click: (item) => settings.set({ hideOverTabs: item.checked }),
     },
     {
       label: 'Hide from screen sharing',
@@ -1278,6 +1297,8 @@ function refresh(force = false) {
   for (const alert of alerts.update(effective.filter((s) => !muted.has(s.id)), now, values)) notify(alert);
   const idleNow = idle.update(decorated, now, extrasBusy());
   notches.setIdleHidden(values.autoHideWhenIdle && idleNow);
+  // A session that starts (or stops) needing you brings back (or hides) a notch over tabs.
+  notches.setHiddenDisplays(notchHiddenDisplayIds());
 }
 
 // ---- Approve from the notch (opt-in) ----
@@ -1629,7 +1650,7 @@ app.whenReady().then(async () => {
 
   const resync = () => {
     notches.sync();
-    notches.setHiddenDisplays(fullscreenDisplayIds());
+    notches.setHiddenDisplays(notchHiddenDisplayIds());
     pet.setHiddenDisplays(fullscreenDisplayIds());
   };
   screen.on('display-metrics-changed', resync);
@@ -1645,7 +1666,7 @@ app.whenReady().then(async () => {
   fullscreen = new FullscreenMonitor({ log });
   fullscreen.on('change', (state) => {
     trackForeground(state);
-    notches.setHiddenDisplays(fullscreenDisplayIds());
+    notches.setHiddenDisplays(notchHiddenDisplayIds());
     pet.setHiddenDisplays(fullscreenDisplayIds());
     returnRequestsToTerminal(state.foreground).catch((e) => log(`Hand-back check failed: ${e.message}`));
   });

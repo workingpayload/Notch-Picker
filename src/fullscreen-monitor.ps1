@@ -3,6 +3,8 @@
 # Prints one JSON line whenever any of these change:
 #   {"quns":5,"fullscreen":null,"fg":1836332}
 #   {"quns":2,"fullscreen":{"x":0,"y":0,"width":1920,"height":1200},"fg":4657504}   (physical pixels)
+#   {"quns":5,"fullscreen":null,"fg":1836332,"fgApp":"chrome","fgRect":{"x":0,"y":0,"width":1920,"height":1152}}
+#   (fgApp / fgRect: the foreground app's process name and visible frame; absent for the shell)
 # With "windows on", it also prints the visible app windows (for desktop pets) when they change:
 #   {"windows":[[hwnd,left,top,right,bottom,cover],...]}   (topmost first, physical pixels; cover = maximized)
 # With "wsl on", it also prints the open WSL terminals per distro (wsl.exe processes and distro
@@ -71,6 +73,31 @@ public static class NotchFullscreen {
 
   public static long Foreground() {
     return GetForegroundWindow().ToInt64();
+  }
+
+  static uint lastPid;
+  static string lastApp = "";
+
+  // The foreground app (process name) and its visible frame, for "hide over tabs", as JSON
+  // members to append (",\"fgApp\":\"chrome\",\"fgRect\":{...}"), or "" (none, minimized, shell).
+  public static string ForegroundApp() {
+    IntPtr h = GetForegroundWindow();
+    if (h == IntPtr.Zero || !IsWindowVisible(h) || IsIconic(h)) return "";
+    var cls = new StringBuilder(256);
+    GetClassName(h, cls, 256);
+    if (Array.IndexOf(ShellClasses, cls.ToString()) >= 0) return "";
+    uint pid;
+    GetWindowThreadProcessId(h, out pid);
+    if (pid == 0) return "";
+    if (pid != lastPid) {
+      try { lastApp = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { lastApp = ""; }
+      lastPid = pid;
+    }
+    if (lastApp.Length == 0) return "";
+    RECT r;
+    if (DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, out r, 16) != 0 && !GetWindowRect(h, out r)) return "";
+    string app = lastApp.Replace("\\", "\\\\").Replace("\"", "\\\"");
+    return ",\"fgApp\":\"" + app + "\",\"fgRect\":{\"x\":" + r.Left + ",\"y\":" + r.Top + ",\"width\":" + (r.Right - r.Left) + ",\"height\":" + (r.Bottom - r.Top) + "}";
   }
 
   // ---- App windows, for desktop pets to walk on ----
@@ -284,7 +311,8 @@ while ($true) {
     $quns = [NotchFullscreen]::Quns()
     $fs = [NotchFullscreen]::FullscreenMonitor($quns)
     $fg = [NotchFullscreen]::Foreground()
-    $line = '{"quns":' + $quns + ',"fullscreen":' + $(if ($fs) { $fs } else { 'null' }) + ',"fg":' + $fg + '}'
+    $fgApp = [NotchFullscreen]::ForegroundApp()
+    $line = '{"quns":' + $quns + ',"fullscreen":' + $(if ($fs) { $fs } else { 'null' }) + ',"fg":' + $fg + $fgApp + '}'
     if ($line -ne $last) {
       [Console]::Out.WriteLine($line)
       [Console]::Out.Flush()

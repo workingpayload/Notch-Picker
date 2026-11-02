@@ -47,3 +47,28 @@ test('hotkey setting accepts accelerators and rejects junk', () => {
   assert.equal(sanitize({ hotkey: 'rm -rf' }).hotkey, DEFAULTS.hotkey);
   assert.equal(sanitize({ hotkey: 42 }).hotkey, DEFAULTS.hotkey);
 });
+
+const { tabHiddenDisplayIds } = require('../src/tab-hide');
+
+test('the notch hides over a tabbed app whose tab strip is under the pill', () => {
+  const notches = [
+    { displayId: 1, bounds: { x: 0, y: 0, width: 1280, height: 800 }, pill: { x: 540, width: 200 }, zoom: 1 },
+    { displayId: 2, bounds: { x: -3440, y: 0, width: 3440, height: 1440 }, pill: { x: -1820, width: 200 }, zoom: 1 },
+  ];
+  const hidden = (app, rect, attention) => [...tabHiddenDisplayIds({ app, rect, notches, attention })];
+  const maximized = { x: 0, y: 0, width: 1280, height: 752 };
+  assert.deepEqual(hidden('chrome', maximized), [1]);
+  assert.deepEqual(hidden('WindowsTerminal', { x: -5, y: -7, width: 1290, height: 760 }), [1]);
+  assert.deepEqual(hidden('Code', { x: -3440, y: 0, width: 3440, height: 1392 }), [2]);
+  // Not a tabbed app, tabs below the pill, beside the pill, or a session needs you.
+  assert.deepEqual(hidden('mspaint', maximized), []);
+  assert.deepEqual(hidden('msedge', { x: 100, y: 120, width: 900, height: 600 }), []);
+  assert.deepEqual(hidden('msedge', { x: 0, y: 0, width: 520, height: 752 }), []);
+  assert.deepEqual(hidden('firefox', maximized, true), []);
+  assert.deepEqual(hidden('firefox', null), []);
+});
+
+test('hide over tabs is on by default and can be turned off', () => {
+  assert.equal(DEFAULTS.hideOverTabs, true);
+  assert.equal(sanitize({ hideOverTabs: false }).hideOverTabs, false);
+});

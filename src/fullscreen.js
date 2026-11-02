@@ -16,16 +16,23 @@ function parseLine(line) {
     const v = JSON.parse(line);
     if (Array.isArray(v.windows)) return { windows: parseWindows(v.windows) };
     if ('wslClients' in v) return { wslClients: parseWslClients(v.wslClients) };
-    const r = v.fullscreen;
-    const rect = r && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
+    const fgRect = parseRect(v.fgRect);
+    const fgApp = typeof v.fgApp === 'string' && /^[^\u0000-\u001f]{1,100}$/.test(v.fgApp) ? v.fgApp : '';
     return {
       quns: Number.isFinite(v.quns) ? v.quns : 0,
-      fullscreen: rect,
+      fullscreen: parseRect(v.fullscreen),
       foreground: Number.isSafeInteger(v.fg) && v.fg > 0 ? v.fg : 0,
+      // The foreground app's process name and visible frame (physical pixels), for "hide over tabs".
+      foregroundApp: fgApp && fgRect ? fgApp : '',
+      foregroundRect: fgApp && fgRect ? fgRect : null,
     };
   } catch {
     return null;
   }
+}
+
+function parseRect(r) {
+  return r && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? { x: r.x, y: r.y, width: r.width, height: r.height } : null;
 }
 
 // [[hwnd, left, top, right, bottom, cover], ...] (topmost first, physical pixels) ->
@@ -47,14 +54,14 @@ function isQuiet(state) {
   return state.quns === QUNS.PRESENTATION || state.quns === QUNS.QUIET_TIME;
 }
 
-// Runs fullscreen-monitor.ps1 and emits 'change' with { quns, fullscreen } (fullscreen = physical
-// monitor rect), while window tracking is on, 'windows' with the visible app windows, and while
+// Runs fullscreen-monitor.ps1 and emits 'change' with { quns, fullscreen, foreground, foregroundApp,
+// foregroundRect } (rects in physical pixels), while window tracking is on, 'windows' with the visible app windows, and while
 // WSL tracking is on, 'wsl' with the open WSL terminals per distro (null when unknown).
 class FullscreenMonitor extends EventEmitter {
   constructor({ log = () => {} } = {}) {
     super();
     this.log = log;
-    this.state = { quns: 0, fullscreen: null, foreground: 0 };
+    this.state = { quns: 0, fullscreen: null, foreground: 0, foregroundApp: '', foregroundRect: null };
     this.child = null;
     this.stopped = true;
     this.quickRestarts = 0;

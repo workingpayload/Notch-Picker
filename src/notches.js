@@ -8,6 +8,8 @@ const { shouldShow } = require('./visibility');
 const WIN_WIDTH = 400;
 const WIN_HEIGHT = 350;
 const EDGE_MARGIN = 12;
+// The renderer's retract animation (styles.css, body.retracted) runs before the window hides.
+const HIDE_ANIMATION_MS = 260;
 
 // Owns the notch windows: one on the primary display, one that follows the cursor's display,
 // or one per display. Handles placement, hover hit-testing and full-screen hiding.
@@ -106,6 +108,7 @@ class NotchManager {
     for (const [slot, n] of this.notches) {
       if (wanted.has(slot)) continue;
       this.notches.delete(slot);
+      clearTimeout(n.hideTimer);
       if (!n.win.isDestroyed()) n.win.destroy();
     }
     this.applyVisibility();
@@ -141,7 +144,7 @@ class NotchManager {
       title: 'Notch Picker',
       webPreferences: { ...this.webPreferences, autoplayPolicy: 'no-user-gesture-required' },
     });
-    const n = { slot, win, displayId: null, hoverRect: null, hovering: false, ready: false };
+    const n = { slot, win, displayId: null, hoverRect: null, hovering: false, ready: false, hideTimer: null };
     win.setAlwaysOnTop(true, 'screen-saver');
     // macOS: stay visible on every Space, including over full-screen apps' Spaces.
     if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -153,6 +156,7 @@ class NotchManager {
       this.applyVisibility();
     });
     win.on('closed', () => {
+      clearTimeout(n.hideTimer);
       if (this.notches.get(slot) === n) this.notches.delete(slot);
     });
     this.onWindowCreated(win);
@@ -245,6 +249,8 @@ class NotchManager {
     return !this.userHidden;
   }
 
+  // Hiding plays the renderer's retract animation (the pill slides up into the top edge) before
+  // the window goes; showing again springs it back down, reversing a retract still under way.
   applyVisibility() {
     for (const n of this.notches.values()) {
       if (!n.ready || n.win.isDestroyed()) continue;
@@ -255,17 +261,26 @@ class NotchManager {
         idleHidden: this.idleHidden,
         hovering: n.hovering,
       });
-      if (show && !n.win.isVisible()) {
+      if (show && n.hideTimer) {
+        clearTimeout(n.hideTimer);
+        n.hideTimer = null;
+        n.win.webContents.send('notch:visibility', true);
+      } else if (show && !n.win.isVisible()) {
         n.win.showInactive();
         n.win.setAlwaysOnTop(true, 'screen-saver');
-      } else if (!show && n.win.isVisible()) {
-        n.win.hide();
+        n.win.webContents.send('notch:visibility', true);
+      } else if (!show && n.win.isVisible() && !n.hideTimer) {
         if (n.hovering) {
           n.hovering = false;
           n.hoverRegion = null;
           n.win.setIgnoreMouseEvents(true);
           n.win.webContents.send('notch:hover', false);
         }
+        n.win.webContents.send('notch:visibility', false);
+        n.hideTimer = setTimeout(() => {
+          n.hideTimer = null;
+          if (!n.win.isDestroyed()) n.win.hide();
+        }, HIDE_ANIMATION_MS);
       }
     }
   }
@@ -275,7 +290,7 @@ class NotchManager {
   pollHover() {
     const p = screen.getCursorScreenPoint();
     for (const n of this.notches.values()) {
-      if (n.win.isDestroyed() || !n.win.isVisible() || !n.hoverRect || n.dragging) continue;
+      if (n.win.isDestroyed() || !n.win.isVisible() || n.hideTimer || !n.hoverRect || n.dragging) continue;
       const b = n.win.getBounds();
       const x = p.x - b.x;
       const y = p.y - b.y;

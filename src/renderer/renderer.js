@@ -1452,6 +1452,10 @@ pinButton.addEventListener('click', (e) => {
 window.notchApi.onPinned(setPinned);
 window.notchApi.getPinned().then(setPinned);
 
+// Hiding: the island retracts up into the top edge before the window goes (main waits for it);
+// showing again: it drops back down with a spring.
+window.notchApi.onVisibility((visible) => document.body.classList.toggle('retracted', !visible));
+
 timerButton.addEventListener('click', (e) => {
   e.stopPropagation();
   window.notchApi.timerMenu();

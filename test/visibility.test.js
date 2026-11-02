@@ -72,3 +72,70 @@ test('hide over tabs is on by default and can be turned off', () => {
   assert.equal(DEFAULTS.hideOverTabs, true);
   assert.equal(sanitize({ hideOverTabs: false }).hideOverTabs, false);
 });
+
+test('hiding the notch plays the retract animation first; showing again cancels it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const display = { id: 1, bounds: { x: 0, y: 0, width: 1280, height: 800 } };
+  const windows = [];
+  class FakeWindow {
+    constructor() {
+      this.visible = false;
+      this.sent = [];
+      this.handlers = {};
+      this.webContents = { send: (channel, ...args) => this.sent.push([channel, ...args]) };
+      windows.push(this);
+    }
+    setAlwaysOnTop() {}
+    setIgnoreMouseEvents() {}
+    setContentProtection() {}
+    loadFile() {}
+    setBounds(b) { this.bounds = b; }
+    getBounds() { return this.bounds; }
+    once(event, cb) { this.handlers[event] = cb; }
+    on() {}
+    isDestroyed() { return false; }
+    isVisible() { return this.visible; }
+    showInactive() { this.visible = true; }
+    hide() { this.visible = false; }
+  }
+  const electronPath = require.resolve('electron');
+  require.cache[electronPath] = {
+    id: electronPath,
+    filename: electronPath,
+    loaded: true,
+    exports: {
+      BrowserWindow: FakeWindow,
+      screen: {
+        getPrimaryDisplay: () => display,
+        getAllDisplays: () => [display],
+        getDisplayNearestPoint: () => display,
+        getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+      },
+    },
+  };
+  const { NotchManager } = require('../src/notches');
+  const m = new NotchManager({ webPreferences: {}, getSettings: () => ({ ...DEFAULTS }) });
+  m.sync();
+  const [w] = windows;
+  w.handlers['ready-to-show']();
+  assert.equal(w.visible, true);
+  const visibility = () => w.sent.filter(([c]) => c === 'notch:visibility').map(([, v]) => v);
+
+  m.setHiddenDisplays(new Set([1]));
+  assert.deepEqual(visibility(), [true, false]);
+  assert.equal(w.visible, true, 'still on screen while the retract animation plays');
+  t.mock.timers.tick(300);
+  assert.equal(w.visible, false);
+
+  m.setHiddenDisplays(new Set());
+  assert.equal(w.visible, true);
+  assert.deepEqual(visibility(), [true, false, true]);
+
+  // Shown again mid-retract: the window never hides and the animation reverses.
+  m.setHiddenDisplays(new Set([1]));
+  t.mock.timers.tick(100);
+  m.setHiddenDisplays(new Set());
+  t.mock.timers.tick(500);
+  assert.equal(w.visible, true);
+  assert.deepEqual(visibility(), [true, false, true, false, true]);
+});

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('notchApi', {
   onUpdate: (cb) => ipcRenderer.on('sessions:update', (_e, sessions) => cb(sessions)),
   onTransition: (cb) => ipcRenderer.on('sessions:transition', (_e, t) => cb(t)),
   onHover: (cb) => ipcRenderer.on('notch:hover', (_e, hovering, region) => cb(hovering, region)),
+  onVisibility: (cb) => ipcRenderer.on('notch:visibility', (_e, visible) => cb(visible)),
   onChime: (cb) => ipcRenderer.on('notch:chime', (_e, kind) => cb(kind)),
   reportRect: (rect) => ipcRenderer.send('notch:rect', rect),
   showMenu: () => ipcRenderer.send('menu:show'),

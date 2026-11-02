@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Notch Picker downloads",
+  "version": "1.0.0",
+  "description": "Shows this browser's downloads in the Notch Picker notch, with pause, resume and cancel. Talks only to Notch Picker on this computer.",
+  "permissions": ["downloads", "storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "downloads@notch-picker",
+      "strict_min_version": "121.0"
+    }
+  }
+}

@@ -38,7 +38,8 @@
     ],
     "asarUnpack": [
       "src/**/*.ps1",
-      "src/hooks/**"
+      "src/hooks/**",
+      "src/browser-extension/**"
     ],
     "electronLanguages": [
       "en-US"

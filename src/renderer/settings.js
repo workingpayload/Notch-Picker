@@ -33,13 +33,18 @@ function flashStatus(text) {
   statusTimer = setTimeout(() => (statusEl.textContent = ''), 1500);
 }
 
+// Lists (download folders) are edited as one text, separated by ';'.
+function fieldValue(v) {
+  return Array.isArray(v) ? v.join('; ') : v;
+}
+
 function fill(values) {
   for (const input of form.querySelectorAll('input[name], select[name]')) {
     if (!(input.name in values)) continue;
     // Don't overwrite a field the user is in the middle of typing.
     if (input === document.activeElement && ['number', 'text', 'url'].includes(input.type)) continue;
     if (input.type === 'checkbox') input.checked = !!values[input.name];
-    else input.value = values[input.name];
+    else input.value = fieldValue(values[input.name]);
   }
   showAgent(values.agent);
 }
@@ -61,9 +66,14 @@ form.addEventListener('change', async (e) => {
   const value = input.type === 'checkbox' ? input.checked : input.type === 'number' ? Number(input.value) : input.value;
   const saved = await window.notchApi.setSettings(input.name === 'position' ? { position: value, offsetX: 0 } : { [input.name]: value });
   // Reflect clamping / rejected values back into the field.
-  if (['number', 'text', 'url'].includes(input.type)) input.value = saved[input.name];
+  if (['number', 'text', 'url'].includes(input.type)) input.value = fieldValue(saved[input.name]);
   fill(saved);
   if (input.name === 'hotkey') await showHotkeyStatus();
+  if (input.name === 'downloads') showExtensionStatus();
+  if (input.name === 'downloadFolders' && value.trim() && !saved.downloadFolders.length) {
+    flashStatus('Use full folder paths, such as D:\\Downloads');
+    return;
+  }
   if (input.name === 'updateFeedUrl' && value.trim() && !saved.updateFeedUrl) {
     flashStatus('Use an https:// URL (or http://localhost for testing)');
     return;
@@ -86,6 +96,33 @@ function normalizeUrl(value) {
 form.addEventListener('submit', (e) => e.preventDefault());
 
 document.getElementById('pet-settings').addEventListener('click', () => window.notchApi.openPetSettings());
+
+// The browser extension reports while downloads run; the status shows which browsers did lately.
+const extensionStatus = document.getElementById('extension-status');
+
+async function showExtensionStatus() {
+  const s = await window.notchApi.downloadsStatus();
+  extensionStatus.classList.remove('ok', 'error');
+  if (!s.on) extensionStatus.textContent = 'Browser downloads are off';
+  else if (!s.port) {
+    extensionStatus.textContent = 'The extension can’t connect: ports 47615–47617 are in use';
+    extensionStatus.classList.add('error');
+  } else if (s.browsers.length) {
+    extensionStatus.textContent = `Connected: ${s.browsers.join(', ')}`;
+    extensionStatus.classList.add('ok');
+  } else extensionStatus.textContent = 'Once added, it connects when a download starts';
+}
+
+document.getElementById('open-extension').addEventListener('click', async () => {
+  const result = await window.notchApi.openDownloadExtension();
+  if (!result.ok) {
+    extensionStatus.textContent = `Couldn’t open ${result.dir}: ${result.error}`;
+    extensionStatus.classList.add('error');
+  }
+});
+
+showExtensionStatus();
+setInterval(showExtensionStatus, 5000);
 
 document.getElementById('test').addEventListener('click', async () => {
   await window.notchApi.testNotification();

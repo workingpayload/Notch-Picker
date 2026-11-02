@@ -28,9 +28,10 @@ const { SPECIES_NAMES } = require('./pet-sprites');
 const { PetStats, XP, badgeTier } = require('./pet-stats');
 const { Wellbeing } = require('./wellbeing');
 const { MediaMonitor } = require('./media');
+const { DownloadMonitor } = require('./download-monitor');
 const { QuickTimer, describeDuration, TIMER_PRESETS_MIN } = require('./timer');
 const { Shelf, isOpenable } = require('./shelf');
-const { mediaPlaying } = require('./island');
+const { mediaPlaying, downloadSummary } = require('./island');
 
 // The original app ID (from when the app was Copilot Notch); see setAppUserModelId below.
 const APP_ID = 'com.copilot.notch';
@@ -69,8 +70,9 @@ const alerts = new AlertTracker();
 const git = new GitInfo();
 const idle = new IdleTracker();
 const liveNotifications = new Set();
-// Island extras: now playing, quick timer, file shelf (icons are looked up once per file).
+// Island extras: now playing, quick timer, file shelf (icons are looked up once per file), downloads.
 let media = null;
+let downloads = null;
 let shelf = null;
 let lastExtras = '';
 const quickTimer = new QuickTimer();
@@ -178,6 +180,7 @@ function applySettings(values) {
   registerHotkey(values.hotkey);
   syncApprovals(values);
   syncMedia(values);
+  syncDownloads(values);
   if (!values.quickTimer) quickTimer.stop();
   sendExtras(true);
   if (updater) updater.configure({ feedUrl: values.updateFeedUrl, auto: values.autoUpdate });
@@ -1036,6 +1039,7 @@ function extrasState() {
   return {
     media: values.mediaControls && media ? media.state : null,
     timer: values.quickTimer ? quickTimer.snapshot() : null,
+    downloads: values.downloads && downloads ? downloads.state : [],
     shelf:
       values.shelf && shelf
         ? shelf.list().map((item) => {
@@ -1058,7 +1062,93 @@ function sendExtras(force = false) {
 // Something besides sessions keeps the notch busy (for auto-hide when idle).
 function extrasBusy() {
   const values = settings.get();
-  return (values.mediaControls && !!media && mediaPlaying(media.state)) || (values.quickTimer && !!quickTimer.snapshot());
+  return (
+    (values.mediaControls && !!media && mediaPlaying(media.state)) ||
+    (values.quickTimer && !!quickTimer.snapshot()) ||
+    (values.downloads && !!downloads && !!downloadSummary(downloads.state))
+  );
+}
+
+// ---- Browser downloads: the Downloads folder (and extra folders) plus the browser extension ----
+
+function downloadFolders(values) {
+  return [app.getPath('downloads'), ...values.downloadFolders];
+}
+
+function syncDownloads(values) {
+  if (values.downloads) {
+    if (!downloads) {
+      downloads = new DownloadMonitor({ log });
+      downloads.on('change', () => sendExtras());
+      downloads.on('finished', onDownloadFinished);
+    }
+    downloads.start(downloadFolders(values)).catch((e) => log(`Downloads: ${e.message}`));
+  } else if (downloads) {
+    downloads.stop();
+  }
+}
+
+function onDownloadFinished(ev) {
+  log(`Download ${ev.ok ? 'finished' : `failed (${ev.error || 'unknown'})`}: ${ev.name}`);
+  send('extras:event', { kind: 'download', ...ev, openable: ev.ok && !!ev.path && isOpenable(ev.path) });
+}
+
+function existingPath(p) {
+  return typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p) ? p : null;
+}
+
+// Opening a download never runs a program (same rule as the shelf): anything that isn't a
+// document, image, media file or archive is shown in its folder instead.
+function downloadAction(key, action) {
+  if (!downloads || !settings.get().downloads) return;
+  key = String(key);
+  if (action === 'pause' || action === 'resume' || action === 'cancel') {
+    downloads.command(key, action);
+    return;
+  }
+  if (action === 'clear') return downloads.dismiss('*');
+  if (action === 'dismiss') return downloads.dismiss(key);
+  const d = downloads.find(key);
+  if (!d) return;
+  const file = existingPath(d.path);
+  if (action === 'open' && file && d.state === 'done') {
+    if (isOpenable(file)) shell.openPath(file).then((err) => err && log(`Could not open download: ${err}`));
+    else shell.showItemInFolder(file);
+    return;
+  }
+  if (action === 'open' || action === 'show') {
+    const target = file || existingPath(d.tempPath);
+    if (target) shell.showItemInFolder(target);
+    else {
+      // Never openPath here: d.path may come from a browser extension. Only reveal a real folder.
+      const dir = d.path ? existingPath(path.dirname(d.path)) : null;
+      if (dir && fs.statSync(dir).isDirectory()) shell.showItemInFolder(dir);
+    }
+  }
+}
+
+// The companion browser extension, copied to the settings folder so the browser can load it from
+// a path that survives app updates (and isn't inside the app's archive).
+function extensionDir() {
+  return path.join(app.getPath('userData'), 'browser-extension');
+}
+
+function copyExtension() {
+  const src = path.join(__dirname, 'browser-extension').replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+  const dest = extensionDir();
+  fs.mkdirSync(dest, { recursive: true });
+  for (const name of fs.readdirSync(src)) fs.copyFileSync(path.join(src, name), path.join(dest, name));
+  return dest;
+}
+
+// Keeps an already-installed copy up to date with this version of the app.
+function refreshExtensionCopy() {
+  if (!fs.existsSync(extensionDir())) return;
+  try {
+    copyExtension();
+  } catch (e) {
+    log(`Could not update the browser extension folder: ${e.message}`);
+  }
 }
 
 // The media helper only runs while "Now playing" is on (Windows).
@@ -1397,6 +1487,22 @@ function registerIpc() {
     const window = BrowserWindow.fromWebContents(e.sender);
     if (window && settings.get().quickTimer) popupMenu(Menu.buildFromTemplate(timerMenuItems()), window);
   });
+  ipcMain.on('download:action', (_e, key, action) => downloadAction(key, String(action)));
+  ipcMain.handle('downloads:status', () => ({
+    on: !!settings.get().downloads,
+    ...(downloads ? downloads.status() : { port: 0, browsers: [], folders: [] }),
+    extensionDir: extensionDir(),
+  }));
+  ipcMain.handle('downloads:open-extension', async () => {
+    try {
+      const dir = copyExtension();
+      const err = await shell.openPath(dir);
+      return { ok: !err, dir, error: err || '' };
+    } catch (e) {
+      log(`Could not prepare the browser extension: ${e.message}`);
+      return { ok: false, dir: extensionDir(), error: e.message };
+    }
+  });
   // Dropped paths are checked in Shelf.add (absolute, existing); everything else only acts on
   // paths that are already on the shelf.
   ipcMain.on('shelf:add', (_e, paths) => {
@@ -1506,6 +1612,8 @@ app.whenReady().then(async () => {
   quickTimer.on('change', () => sendExtras());
   quickTimer.on('done', onTimerDone);
   syncMedia(settings.get());
+  syncDownloads(settings.get());
+  refreshExtensionCopy();
 
   tray = new Tray(trayImage(null, false));
   tray.setToolTip('Notch Picker');
@@ -1618,6 +1726,7 @@ app.on('before-quit', () => {
   if (watcher) watcher.stop();
   if (fullscreen) fullscreen.stop();
   if (media) media.stop();
+  if (downloads) downloads.stop();
   quickTimer.dispose();
 });
 

@@ -23,15 +23,48 @@ function timerRunning(timer) {
   return !!timer && (!!timer.runningSince || timer.accumulatedMs > 0);
 }
 
+const LIVE_DOWNLOAD_STATES = new Set(['active', 'paused', 'stalled']);
+
+function isLiveDownload(d) {
+  return !!d && LIVE_DOWNLOAD_STATES.has(d.state);
+}
+
+// The pill's view of the live downloads (null when none): one name or "3 downloads", combined
+// bytes, a 0..1 progress when every size is known (else null), speed and time left.
+function downloadSummary(list) {
+  const live = (list || []).filter(isLiveDownload);
+  if (!live.length) return null;
+  const received = live.reduce((n, d) => n + (d.received || 0), 0);
+  const known = live.every((d) => d.total > 0);
+  const total = known ? live.reduce((n, d) => n + d.total, 0) : 0;
+  const speed = live.reduce((n, d) => n + (d.speed || 0), 0);
+  let etaMs = 0;
+  if (known && speed > 0 && total > received) etaMs = Math.round(((total - received) / speed) * 1000);
+  else etaMs = live.reduce((n, d) => Math.max(n, d.etaMs || 0), 0);
+  return {
+    count: live.length,
+    name: live.length === 1 ? live[0].name || 'Downloading…' : `${live.length} downloads`,
+    key: live[0].key,
+    received,
+    total,
+    progress: known ? Math.min(1, received / total) : null,
+    speed,
+    etaMs,
+    // Every download paused by the user (a stalled one, no data for a while, isn't "paused").
+    paused: live.every((d) => d.state === 'paused'),
+    browser: live.length === 1 ? live[0].browser || '' : '',
+  };
+}
+
 // Activities in priority order: sessions (already sorted by urgency, muted last), then a running
-// timer, then playing media. `pickedId` is a session the user scrolled to on the pill; it is shown
-// first unless another session needs attention.
+// timer, then downloads in progress, then playing media. `pickedId` is a session the user scrolled
+// to on the pill; it is shown first unless another session needs attention.
 //
 // Returns { primary, secondary, more }:
-//   primary   - what the pill shows: { kind: 'session' | 'media' | 'timer' | 'none', ... }
+//   primary   - what the pill shows: { kind: 'session' | 'media' | 'timer' | 'download' | 'none', ... }
 //   secondary - what the split bubble shows (null when there is only one activity)
 //   more      - how many further activities are hidden
-function planIsland({ sessions = [], media = null, timer = null, pickedId = null } = {}) {
+function planIsland({ sessions = [], media = null, timer = null, downloads = null, pickedId = null } = {}) {
   const active = sessions.filter(isActiveSession);
   const picked = pickedId ? sessions.find((s) => s.id === pickedId && !s.muted) : null;
   const alerting = active.find(isAlerting);
@@ -40,6 +73,8 @@ function planIsland({ sessions = [], media = null, timer = null, pickedId = null
 
   const list = ordered.map((session) => ({ kind: 'session', id: session.id, session }));
   if (timerRunning(timer)) list.push({ kind: 'timer', id: 'timer', timer });
+  const download = downloadSummary(downloads);
+  if (download) list.push({ kind: 'download', id: 'download', download });
   if (mediaPlaying(media)) list.push({ kind: 'media', id: 'media', media });
 
   let primary = list[0];
@@ -61,7 +96,7 @@ function cycleSession(sessions, currentId, direction) {
   return live[next].id;
 }
 
-const BANNER_MS = { done: 3600, error: 4500, attention: 5000, timer: 6000, battery: 3200, media: 3000 };
+const BANNER_MS = { done: 3600, error: 4500, attention: 5000, timer: 6000, battery: 3200, media: 3000, download: 4500 };
 
 // A transition from the session watcher as a banner, or null. `top` is the pill's current top
 // session: a finished session doesn't take over while another one needs you.
@@ -197,6 +232,71 @@ function formatClock(ms, { roundUp = false } = {}) {
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
 
+// 1536 -> "1.5 KB", 12345678 -> "12.3 MB" (decimal units, like browsers' download lists).
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(n >= 1e11 ? 0 : 1)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)} KB`;
+  return `${Math.round(n)} B`;
+}
+
+function formatRate(bytesPerSec) {
+  return bytesPerSec > 0 ? `${formatBytes(bytesPerSec)}/s` : '';
+}
+
+// Time left: "8 s left", "3 min left", "1 h 5 min left" ('' when unknown).
+function formatEta(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const s = Math.ceil(ms / 1000);
+  if (s < 60) return `${s} s left`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min left`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} h ${m % 60} min left` : `${h} h left`;
+}
+
+// Why a download failed, from the browser's interrupt reason ('' when it doesn't say).
+function downloadError(code) {
+  if (!code) return '';
+  if (code === 'FILE_NO_SPACE') return 'Disk is full';
+  if (code === 'FILE_ACCESS_DENIED') return 'Access denied';
+  if (code === 'FILE_TOO_LARGE') return 'File too large';
+  if (code === 'FILE_VIRUS_INFECTED' || code === 'FILE_BLOCKED' || code === 'FILE_SECURITY_CHECK_FAILED') return 'Blocked';
+  if (code.startsWith('NETWORK_')) return 'Network error';
+  if (code.startsWith('SERVER_')) return 'Server error';
+  if (code.startsWith('FILE_')) return 'File error';
+  return '';
+}
+
+// A finished or failed download ({ key, name, browser, ok, error, openable }) as a banner.
+function downloadBanner(ev) {
+  if (!ev || !ev.key) return null;
+  const name = ev.name || 'Download';
+  if (ev.ok) {
+    return {
+      key: `download:${ev.key}`,
+      kind: 'download',
+      status: 'done',
+      title: 'Downloaded',
+      subtitle: ev.browser ? `${name} · ${ev.browser}` : name,
+      downloadKey: ev.key,
+      openable: ev.openable !== false,
+      ms: BANNER_MS.download,
+    };
+  }
+  const why = downloadError(ev.error);
+  return {
+    key: `download:${ev.key}`,
+    kind: 'download',
+    status: 'error',
+    title: 'Download failed',
+    subtitle: why ? `${name} · ${why}` : name,
+    downloadKey: ev.key,
+    ms: BANNER_MS.error,
+  };
+}
+
 {
   const api = {
     planIsland,
@@ -211,6 +311,13 @@ function formatClock(ms, { roundUp = false } = {}) {
     timerRemaining,
     timerProgress,
     formatClock,
+    isLiveDownload,
+    downloadSummary,
+    downloadBanner,
+    downloadError,
+    formatBytes,
+    formatRate,
+    formatEta,
     isAlerting,
     BANNER_MS,
   };

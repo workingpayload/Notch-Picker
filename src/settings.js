@@ -37,6 +37,10 @@ const SCHEMA = {
   batteryAlerts: { type: 'boolean', default: true },
   // Timer / stopwatch from the notch.
   quickTimer: { type: 'boolean', default: true },
+  // Browser download progress (Downloads folder, plus the optional browser extension).
+  downloads: { type: 'boolean', default: true },
+  // Folders watched for downloads besides the Downloads folder.
+  downloadFolders: { type: 'pathList', default: [], max: 10 },
   hotkey: { type: 'accelerator', default: 'Control+Alt+N' },
   hideInFullscreen: { type: 'boolean', default: true },
   muteInFocusAssist: { type: 'boolean', default: true },
@@ -145,6 +149,16 @@ function sanitize(input, base = DEFAULTS) {
       out[key] = ids.slice(-spec.max);
     }
     if (spec.type === 'labels') out[key] = sanitizeLabels(v);
+    // Absolute folder paths; the settings window sends them as one text, separated by ';'.
+    if (spec.type === 'pathList' && (typeof v === 'string' || Array.isArray(v))) {
+      const items = (Array.isArray(v) ? v : v.split(/[;\r\n]+/)).filter((x) => typeof x === 'string');
+      const seen = new Set();
+      out[key] = items
+        .map((x) => x.trim().replace(/^"(.*)"$/, '$1').trim())
+        .filter((x) => x.length > 0 && x.length <= 500 && !/[\u0000-\u001f]/.test(x) && path.isAbsolute(x))
+        .filter((x) => !seen.has(x.toLowerCase()) && seen.add(x.toLowerCase()))
+        .slice(0, spec.max);
+    }
     if (spec.type === 'speciesMap' && v && typeof v === 'object' && !Array.isArray(v)) {
       const entries = Object.entries(v).filter(([id, sp]) => /^[\w-]{1,64}$/.test(id) && SPECIES.includes(sp));
       out[key] = Object.fromEntries(entries.slice(-spec.max));
@@ -181,6 +195,7 @@ class Settings extends EventEmitter {
     return {
       ...this.values,
       mutedSessions: [...this.values.mutedSessions],
+      downloadFolders: [...this.values.downloadFolders],
       sessionLabels: { ...this.values.sessionLabels },
       petSpecies: { ...this.values.petSpecies },
     };

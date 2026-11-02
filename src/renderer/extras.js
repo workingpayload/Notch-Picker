@@ -1,6 +1,6 @@
 'use strict';
 
-// Island extras in the notch: now playing, quick timer, file shelf and battery banners.
+// Island extras in the notch: now playing, quick timer, file shelf, downloads and battery banners.
 // Loaded before renderer.js; uses its globals (el, extras, features, pushBanner, ...) only when
 // called, and renderer.js calls initExtras() once everything is defined.
 
@@ -10,6 +10,9 @@ const ICONS = {
   pause: 'M4 2.5h3v11H4zM9 2.5h3v11H9z',
   previous: 'M3 2.5h2v11H3zM13.5 2.5v11L6 8z',
   next: 'M11 2.5h2v11h-2zM2.5 2.5v11L10 8z',
+  folder: 'M1.5 3h5l1.5 1.6h6.5v8.4h-13z',
+  close: 'M3.6 2.5 8 6.9l4.4-4.4 1.1 1.1L9.1 8l4.4 4.4-1.1 1.1L8 9.1l-4.4 4.4-1.1-1.1L6.9 8 2.5 3.6z',
+  retry: 'M8 2.5a5.5 5.5 0 1 0 5.4 6.5h-1.7A3.9 3.9 0 1 1 8 4.1c1 0 1.9.4 2.6 1L8.5 7.2H14V1.7l-2.2 2.2A5.5 5.5 0 0 0 8 2.5z',
 };
 
 function icon(name) {
@@ -186,13 +189,147 @@ function renderShelf(items) {
   return shelf;
 }
 
+// ---- Downloads: one row per download, updated in place (updates arrive every second, and
+// rebuilding the rows would swallow clicks on their buttons) ----
+
+let downloadsUi = null; // built on first use: el() comes from renderer.js, which loads after this file
+const downloadRows = new Map(); // key -> { el, icon, name, fill, sub, actions, actionsKey, d }
+
+function downloadsSection() {
+  if (downloadsUi) return downloadsUi;
+  const root = el('div', 'downloads');
+  const head = el('div', 'dl-head');
+  const title = el('span');
+  const clear = el('button', 'link-btn', 'Clear');
+  const list = el('div', 'dl-items');
+  clear.type = 'button';
+  clear.title = 'Remove finished downloads from the list (the files stay)';
+  clear.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.notchApi.downloadAction('*', 'clear');
+  });
+  head.append(title, clear);
+  list.setAttribute('role', 'list');
+  root.append(head, list);
+  downloadsUi = { root, title, clear, list };
+  return downloadsUi;
+}
+
+const DOWNLOAD_STATUS = { active: 'download', stalled: 'download', paused: 'timer', done: 'done', failed: 'error' };
+
+function downloadDetail(d) {
+  const { formatBytes, formatRate, formatEta, downloadError } = window.NotchIsland;
+  if (d.state === 'done') return ['Done', d.browser].filter(Boolean).join(' · ');
+  if (d.state === 'failed') return ['Failed', downloadError(d.error), d.browser].filter(Boolean).join(' · ');
+  const size = d.total ? `${formatBytes(d.received)} of ${formatBytes(d.total)}` : formatBytes(d.received);
+  const rate = d.state === 'paused' ? 'Paused' : d.state === 'stalled' ? 'Waiting…' : [formatRate(d.speed), formatEta(d.etaMs)].filter(Boolean).join(' · ');
+  return [size, rate, d.browser].filter(Boolean).join(' · ');
+}
+
+function downloadButton(row, name, label, action) {
+  return iconButton(name, label, () => window.notchApi.downloadAction(row.d.key, action), { cls: 'small' });
+}
+
+function downloadRow(d) {
+  let row = downloadRows.get(d.key);
+  if (!row) {
+    row = { el: el('div', 'dl-item'), icon: el('span', 'dl-icon'), name: el('b', 'dl-name'), meter: el('i', 'meter'), fill: el('b'), sub: el('span', 'dl-sub'), actions: el('div', 'dl-actions'), actionsKey: null };
+    const info = el('div', 'dl-info');
+    row.meter.append(row.fill);
+    info.append(row.name, row.meter, row.sub);
+    row.el.append(row.icon, info, row.actions);
+    row.el.tabIndex = 0;
+    row.el.setAttribute('role', 'listitem');
+    // Click: open a finished file (documents, media, archives; anything else is shown in its
+    // folder), or show a running download in its folder.
+    const activate = () => window.notchApi.downloadAction(row.d.key, row.d.state === 'done' ? 'open' : 'show');
+    row.el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      activate();
+    });
+    row.el.addEventListener('keydown', (e) => {
+      if (e.target !== row.el) return;
+      if (e.key === 'Enter') activate();
+      else if (e.key === 'Delete' && (row.d.state === 'done' || row.d.state === 'failed')) window.notchApi.downloadAction(row.d.key, 'dismiss');
+    });
+    downloadRows.set(d.key, row);
+  }
+  row.d = d;
+  setStatusClass(row.el, DOWNLOAD_STATUS[d.state] || 'download');
+  row.el.dataset.state = d.state;
+  if (row.iconState !== d.state) {
+    row.iconState = d.state;
+    if (d.state === 'paused') row.icon.replaceChildren(icon('pause'));
+    else row.icon.textContent = d.state === 'done' ? '✓' : d.state === 'failed' ? '✕' : '↓';
+  }
+  const name = d.name || 'Downloading…';
+  if (row.name.textContent !== name) row.name.textContent = name;
+  const live = window.NotchIsland.isLiveDownload(d);
+  row.meter.hidden = !live;
+  row.meter.classList.toggle('indeterminate', live && !(d.total > 0));
+  row.fill.style.width = d.total > 0 ? `${Math.min(100, (d.received / d.total) * 100)}%` : '';
+  const detail = downloadDetail(d);
+  if (row.sub.textContent !== detail) row.sub.textContent = detail;
+  row.el.title = `${d.path || name}\n${d.state === 'done' ? 'Click to open' : 'Click to show in folder'}`;
+  row.el.setAttribute('aria-label', `${name}. ${detail}.`);
+
+  const actionsKey = [d.canPause, d.canResume, d.canCancel, d.state].join('|');
+  if (row.actionsKey !== actionsKey) {
+    row.actionsKey = actionsKey;
+    const buttons = [];
+    if (d.canPause) buttons.push(downloadButton(row, 'pause', 'Pause', 'pause'));
+    if (d.canResume) buttons.push(downloadButton(row, d.state === 'failed' ? 'retry' : 'play', d.state === 'failed' ? 'Retry' : 'Resume', 'resume'));
+    if (d.canCancel) buttons.push(downloadButton(row, 'close', 'Cancel download', 'cancel'));
+    if (d.state === 'done' || d.state === 'failed') buttons.push(downloadButton(row, 'close', 'Remove from list', 'dismiss'));
+    else buttons.push(downloadButton(row, 'folder', 'Show in folder', 'show'));
+    row.actions.replaceChildren(...buttons);
+  }
+  return row.el;
+}
+
+function updateDownloads(list) {
+  const ui = downloadsSection();
+  const keys = new Set(list.map((d) => d.key));
+  for (const key of downloadRows.keys()) if (!keys.has(key)) downloadRows.delete(key);
+  const rows = list.map(downloadRow);
+  const current = [...ui.list.children];
+  if (current.length !== rows.length || current.some((n, i) => n !== rows[i])) ui.list.replaceChildren(...rows);
+  const live = list.filter(window.NotchIsland.isLiveDownload).length;
+  ui.title.textContent = live ? `Downloading · ${live}` : 'Downloads';
+  ui.clear.hidden = live === list.length;
+  return ui.root;
+}
+
+// Cards are rebuilt only when what they show changes, so their buttons keep working while
+// other extras (download progress) update every second.
+const mediaCache = { key: null, node: null };
+const shelfCache = { key: null, node: null };
+
+function cached(cache, key, build) {
+  if (cache.key !== key) {
+    cache.key = key;
+    cache.node = build();
+  }
+  return cache.node;
+}
+
 function renderExtras() {
   const parts = [];
   const m = features.media && extras.media;
-  if (m) parts.push(renderMediaCard(m));
-  if (features.shelf && (extras.shelf.length || dropping)) parts.push(renderShelf(extras.shelf));
+  if (m) {
+    const art = m.art ? `${m.art.length}:${m.art.slice(-40)}` : '';
+    parts.push(cached(mediaCache, JSON.stringify({ ...m, art }), () => renderMediaCard(m)));
+  }
+  const dl = features.downloads ? extras.downloads : [];
+  if (dl.length) parts.push(updateDownloads(dl));
+  else downloadRows.clear();
+  if (features.shelf && (extras.shelf.length || dropping)) {
+    const key = JSON.stringify([dropping, extras.shelf.map((i) => [i.path, i.name, i.size, i.dir, i.icon ? i.icon.length : 0])]);
+    parts.push(cached(shelfCache, key, () => renderShelf(extras.shelf)));
+  }
   extrasEl.hidden = !parts.length;
-  extrasEl.replaceChildren(...parts);
+  const current = [...extrasEl.children];
+  if (current.length !== parts.length || current.some((n, i) => n !== parts[i])) extrasEl.replaceChildren(...parts);
   timerButton.hidden = !features.timer;
   renderTimerChip(features.timer ? extras.timer : null);
   liveTickExtras(Date.now());
@@ -269,7 +406,7 @@ let lastTrackKey = null;
 const extrasLoadedAt = Date.now();
 
 function applyExtras(next) {
-  extras = { media: null, timer: null, shelf: [], ...(next || {}) };
+  extras = { media: null, timer: null, shelf: [], downloads: [], ...(next || {}) };
   const m = extras.media;
   // A new track while playing gets a short "now playing" banner.
   if (m && m.status === 'playing') {
@@ -293,6 +430,15 @@ function applyExtras(next) {
 }
 
 function onExtrasEvent(ev) {
+  if (ev && ev.kind === 'download') {
+    if (!features.downloads) return;
+    const b = window.NotchIsland.downloadBanner(ev);
+    if (!b) return;
+    pushBanner(b);
+    if (!cardBanners()) flash(ev.ok ? 'done' : 'error');
+    announce(`${b.title}: ${b.subtitle}`, !ev.ok);
+    return;
+  }
   if (!ev || ev.kind !== 'timer-done') return;
   const title = ev.mode === 'timer' ? 'Timer finished' : 'Stopwatch stopped';
   pushBanner({

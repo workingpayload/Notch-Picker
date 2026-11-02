@@ -30,6 +30,7 @@
   --media: var(--art-dark);
   --media-2: var(--art2-dark);
   --timer: #ff9f0a;
+  --download: #5e5ce6;
   --accent: var(--idle);
   --spring: cubic-bezier(0.32, 1.25, 0.5, 1);
   /* A real spring (overshoot and settle) for the island's shape changes. */
@@ -151,6 +152,7 @@ body {
 .status-stuck { --accent: var(--stuck); }
 .status-media { --accent: var(--media); }
 .status-timer { --accent: var(--timer); }
+.status-download { --accent: var(--download); }
 /* A second colour for gradients: the cover's second colour for media, else the same colour (set on
    every status so a card inside a now-playing pill doesn't inherit the cover's). */
 [class*='status-'] { --accent-2: var(--accent); }
@@ -1594,6 +1596,20 @@ body.island-style .notch.empty .bar .detail {
   transition: stroke-dashoffset 0.35s ease;
 }
 
+/* Unknown total (a download found through its folder): a spinning arc */
+.ring.indeterminate .fill {
+  stroke-dashoffset: 72 !important;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ring-spin 1.1s linear infinite;
+}
+
+@keyframes ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Banner: the pill grows into a card for a few seconds */
 .banner {
   display: flex;
@@ -2155,6 +2171,159 @@ body.island-style .bubble .shoulder.right {
   box-shadow: 0 0 0 2px var(--tool), 0 10px 34px color-mix(in srgb, var(--tool) 45%, transparent);
 }
 
+/* Browser downloads in the panel */
+.downloads {
+  padding: 6px 8px 4px;
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.dl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.dl-head .link-btn[hidden] {
+  display: none;
+}
+
+.dl-items {
+  display: flex;
+  flex-direction: column;
+}
+
+.dl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 4px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.dl-item:hover,
+.dl-item:focus-visible {
+  background: var(--card-hover);
+}
+
+.dl-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dl-icon svg {
+  width: 9px;
+  height: 9px;
+  fill: currentColor;
+}
+
+.dl-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dl-name,
+.dl-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-name {
+  color: var(--fg);
+  font-size: 11.5px;
+}
+
+.dl-sub {
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-item .meter {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--faint);
+  overflow: hidden;
+}
+
+.dl-item .meter[hidden] {
+  display: none;
+}
+
+.dl-item .meter b {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.6s ease;
+}
+
+.dl-item[data-state='stalled'] .meter b,
+.dl-item[data-state='paused'] .meter b {
+  opacity: 0.5;
+}
+
+/* No total size: a sliding bar */
+.dl-item .meter.indeterminate b {
+  position: absolute;
+  width: 35% !important;
+  animation: dl-slide 1.3s ease-in-out infinite;
+}
+
+.dl-item[data-state='stalled'] .meter.indeterminate b {
+  animation-play-state: paused;
+}
+
+@keyframes dl-slide {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.dl-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.icon-btn.small {
+  width: 22px;
+  height: 22px;
+  color: var(--dim);
+}
+
+.icon-btn.small svg {
+  width: 11px;
+  height: 11px;
+}
+
+.icon-btn.small:hover:not(:disabled) {
+  color: var(--fg);
+}
+
 @media (forced-colors: active) {
   .shoulder,
   .bubble {
@@ -2170,6 +2339,7 @@ body.island-style .bubble .shoulder.right {
   }
 
   .media-card,
+  .downloads,
   .shelf {
     border: 1px solid CanvasText;
   }

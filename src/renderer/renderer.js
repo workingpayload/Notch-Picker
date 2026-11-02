@@ -16,7 +16,7 @@ const BUBBLE_WIDTH = 28;
 const PICK_RESET_MS = 15000;
 const LONG_PRESS_MS = 500;
 const CODE_STATUSES = new Set(['approval', 'tool']);
-const STATUS_CLASSES = ['idle', 'done', 'thinking', 'tool', 'agents', 'approval', 'input', 'error', 'stuck', 'media', 'timer'].map((s) => `status-${s}`);
+const STATUS_CLASSES = ['idle', 'done', 'thinking', 'tool', 'agents', 'approval', 'input', 'error', 'stuck', 'media', 'timer', 'download'].map((s) => `status-${s}`);
 
 const island = document.getElementById('island');
 const notch = document.getElementById('notch');
@@ -63,12 +63,12 @@ let align = 'center';
 let agent = 'copilot';
 let collapseTimer = null;
 let flashTimer = null;
-// Island settings and extras (now playing, quick timer, file shelf) from the main process.
+// Island settings and extras (now playing, quick timer, file shelf, downloads) from the main process.
 let islandStyle = true;
 let bannersOn = true;
 let expandOn = 'hover';
-const features = { media: true, shelf: true, battery: true, timer: true };
-let extras = { media: null, timer: null, shelf: [] };
+const features = { media: true, shelf: true, battery: true, timer: true, downloads: true };
+let extras = { media: null, timer: null, shelf: [], downloads: [] };
 // What the pill and bubble show (NotchIsland.planIsland); a session scrolled to on the pill.
 let plan = { primary: { kind: 'none', id: 'none' }, secondary: null, more: 0 };
 let pickedId = null;
@@ -175,16 +175,37 @@ function timerClock(t, now = Date.now()) {
   return t.mode === 'timer' ? formatClock(timerRemaining(t, now), { roundUp: true }) : formatClock(timerElapsed(t, now));
 }
 
+// "Paused", "2.1 MB/s · 12 s left" or "Waiting…" for a download summary (NotchIsland.downloadSummary).
+function downloadRate(d) {
+  const { formatRate, formatEta } = window.NotchIsland;
+  if (d.paused) return 'Paused';
+  const rate = formatRate(d.speed);
+  return rate ? [rate, formatEta(d.etaMs)].filter(Boolean).join(' · ') : 'Waiting…';
+}
+
+function downloadTitle(d) {
+  const { formatBytes } = window.NotchIsland;
+  const size = d.total ? `${formatBytes(d.received)} of ${formatBytes(d.total)}` : formatBytes(d.received);
+  const pct = d.progress != null ? `${Math.floor(d.progress * 100)}% · ` : '';
+  return `${d.name}${d.browser ? ` (${d.browser})` : ''}: ${pct}${size} · ${downloadRate(d)}`;
+}
+
+function setDownloadRing(svg, d) {
+  svg.classList.toggle('indeterminate', d.progress == null);
+  if (d.progress != null) setRing(svg, d.progress);
+}
+
 function renderBar() {
   plan = window.NotchIsland.planIsland({
     sessions,
     media: features.media ? extras.media : null,
     timer: features.timer ? extras.timer : null,
+    downloads: features.downloads ? extras.downloads : null,
     pickedId,
   });
   const primary = plan.primary;
   const top = primary.kind === 'session' ? primary.session : null;
-  const busy = primary.kind === 'media' || primary.kind === 'timer';
+  const busy = primary.kind === 'media' || primary.kind === 'timer' || primary.kind === 'download';
   const textBanner = banner && !cardBanners() ? banner : null;
   notch.classList.toggle('empty', primary.kind === 'none' && !banner);
   notch.classList.toggle('dot-only', window.NotchVisibility.isDotOnly({ compact, top, toast: banner, busy }));
@@ -194,6 +215,7 @@ function renderBar() {
   bar.wave.hidden = true;
   bar.wave.classList.remove('paused');
   bar.ring.toggleAttribute('hidden', true);
+  bar.ring.classList.remove('indeterminate');
   bar.label.title = '';
   setArt(bar.art, null);
 
@@ -228,6 +250,21 @@ function renderBar() {
     if (islandStyle) {
       bar.ring.toggleAttribute('hidden', false);
       setRing(bar.ring, window.NotchIsland.timerProgress(t));
+    }
+  } else if (primary.kind === 'download') {
+    const d = primary.download;
+    setStatusClass(notch, 'download');
+    notch.classList.remove('attention', 'overdue');
+    bar.label.textContent = islandStyle ? d.name : 'Downloading';
+    bar.detail.textContent = islandStyle ? downloadRate(d) : `${d.name} · ${downloadRate(d)}`;
+    bar.label.title = downloadTitle(d);
+    setElapsed(null);
+    // Not a clock: keep tick() from clearing it.
+    delete bar.elapsed.dataset.since;
+    bar.elapsed.textContent = d.progress != null ? `${Math.floor(d.progress * 100)}%` : window.NotchIsland.formatBytes(d.received);
+    if (islandStyle) {
+      bar.ring.toggleAttribute('hidden', false);
+      setDownloadRing(bar.ring, d);
     }
   } else if (!top) {
     setStatusClass(notch, 'idle');
@@ -363,6 +400,7 @@ function bannerIcon(b) {
     battery.append(fill);
     return battery;
   } else if (b.kind === 'timer') icon.append(stopwatchIcon());
+  else if (b.kind === 'download') icon.textContent = b.status === 'error' ? '✕' : '↓';
   else if (b.status === 'done') icon.textContent = '✓';
   else if (b.status === 'error') icon.textContent = '✕';
   else icon.textContent = '!';
@@ -384,15 +422,21 @@ function renderBanner() {
   const side = [];
   if (banner.kind === 'media') side.push(makeWave(true));
   else if (banner.kind === 'battery') side.push(document.createTextNode(`${Math.round((banner.level || 0) * 100)}%`));
+  else if (banner.downloadKey) side.push(document.createTextNode(banner.status === 'done' && banner.openable ? 'Open ›' : 'Show ›'));
   else if (banner.sessionId) side.push(document.createTextNode('Open ›'));
   bannerParts.side.replaceChildren(...side);
-  bannerEl.title = banner.sessionId ? 'Click to open the terminal · swipe up to dismiss' : 'Click or swipe up to dismiss';
+  bannerEl.title = banner.sessionId
+    ? 'Click to open the terminal · swipe up to dismiss'
+    : banner.downloadKey
+      ? `Click to ${banner.status === 'done' && banner.openable ? 'open the file' : 'show it in its folder'} · swipe up to dismiss`
+      : 'Click or swipe up to dismiss';
 }
 
 function bannerAction() {
   const b = banner;
   if (!b) return;
   if (b.sessionId) window.notchApi.focusSession(b.sessionId);
+  else if (b.downloadKey) window.notchApi.downloadAction(b.downloadKey, 'open');
   dismissBanner();
 }
 
@@ -432,6 +476,12 @@ function renderBubble() {
     setRing(ring, window.NotchIsland.timerProgress(sec.timer));
     parts.push(ring);
     title = `${sec.timer.mode === 'timer' ? 'Timer' : 'Stopwatch'} ${timerClock(sec.timer)} — click to ${sec.timer.runningSince ? 'pause' : 'resume'}`;
+  } else if (sec.kind === 'download') {
+    status = 'download';
+    const ring = makeRing('ring download-ring');
+    setDownloadRing(ring, sec.download);
+    parts.push(ring);
+    title = `${downloadTitle(sec.download)} — click to see downloads`;
   }
   if (plan.more) parts.push(el('span', 'bubble-more', `+${plan.more}`));
   setStatusClass(bubbleEl, status);
@@ -447,6 +497,7 @@ bubbleBody.addEventListener('click', (e) => {
   if (kind === 'session') window.notchApi.focusSession(bubbleEl.dataset.id);
   else if (kind === 'media') window.notchApi.mediaCommand('toggle');
   else if (kind === 'timer') window.notchApi.timerAction('toggle');
+  else if (kind === 'download') expand();
 });
 
 // ---- Squish: the island bounces and its content un-blurs when what it shows changes ----
@@ -1753,6 +1804,7 @@ function applySize(values) {
   features.shelf = !values || values.shelf !== false;
   features.battery = !values || values.batteryAlerts !== false;
   features.timer = !values || values.quickTimer !== false;
+  features.downloads = !values || values.downloads !== false;
   artColorsOn = !values || values.mediaArtColors !== false;
   applyArtColors();
   document.body.classList.toggle('island-style', islandStyle);

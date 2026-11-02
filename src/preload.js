@@ -48,6 +48,10 @@ contextBridge.exposeInMainWorld('notchApi', {
   mediaCommand: (command) => ipcRenderer.send('media:command', command),
   timerAction: (action, value) => ipcRenderer.send('timer:action', action, value),
   timerMenu: () => ipcRenderer.send('timer:menu'),
+  // Browser downloads: open / show / pause / resume / cancel / dismiss / clear.
+  downloadAction: (key, action) => ipcRenderer.send('download:action', key, action),
+  downloadsStatus: () => ipcRenderer.invoke('downloads:status'),
+  openDownloadExtension: () => ipcRenderer.invoke('downloads:open-extension'),
   // A dropped File's path (File.path is gone in sandboxed renderers).
   pathForFile: (file) => webUtils.getPathForFile(file),
   shelfAdd: (paths) => ipcRenderer.send('shelf:add', paths),

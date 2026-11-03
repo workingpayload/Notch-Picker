@@ -1049,7 +1049,9 @@ function closeEndedNotifications() {
     liveNotifications.delete(n);
     n.close();
   }
-} and mute state, pushes changes to the notch and fires due alerts.
+}
+
+// Adds time-based "stuck" flags and mute state, pushes changes to the notch and fires due alerts.
 // Sessions with a request waiting in the notch (approve/answer from the notch) show as needing
 // approval or input: the CLI hasn't logged it yet because the hooks run before its own prompt.
 function withPendingApprovals(sessions) {

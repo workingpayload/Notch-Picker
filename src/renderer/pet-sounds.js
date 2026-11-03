@@ -1,8 +1,10 @@
 'use strict';
 
-// Pet calls synthesised with Web Audio (no sound files): meow, woof, oink, baa, a goat's bleat,
-// quack, a bunny's squeak and thump, a fox's yip and robot beeps. kind 'alert' (a session needs
-// you) calls twice; 'pet' (being petted) once, softer.
+// Pet calls: recorded clips found on Openverse (sounds/<species>.mp3, credited in
+// sounds/CREDITS.md and fetched by scripts/fetch-pet-sounds.js). A species without a clip, or one
+// that won't play, falls back to a call synthesised with Web Audio: meow, woof, oink, baa, a
+// goat's bleat, quack, a bunny's squeak and thump, a fox's yip and robot beeps. kind 'alert' (a
+// session needs you) is louder and short calls play twice; 'pet' (being petted) once, softer.
 (function () {
   let ctx = null;
 
@@ -93,14 +95,32 @@
     goat: (a, t, v) => voice(a, t, { pitch: [460, 430, 400], dur: 0.55, band: 1500, q: 2, vibrato: 12, vibratoDepth: 40, volume: v }),
   };
 
-  function play(species, kind) {
-    const call = CALLS[species] || CALLS.cat;
+  function synth(species, kind) {
+    const call = CALLS[species];
     const a = audio();
     const t = a.currentTime + 0.02;
     if (kind === 'alert') {
       call(a, t, 0.2);
       call(a, t + 0.85, 0.2);
     } else call(a, t, 0.12);
+  }
+
+  const noClip = new Set(); // species whose clip is missing or won't decode
+
+  function play(species, kind) {
+    const known = CALLS[species] ? species : 'cat';
+    if (noClip.has(known)) return synth(known, kind);
+    const clip = new Audio(`sounds/${known}.mp3`);
+    clip.volume = kind === 'alert' ? 0.8 : 0.45;
+    let again = kind === 'alert';
+    clip.addEventListener('ended', () => {
+      if (again && clip.duration < 1.5) setTimeout(() => clip.play().catch(() => {}), 250);
+      again = false;
+    });
+    clip.play().catch((err) => {
+      if (err && err.name === 'NotSupportedError') noClip.add(known);
+      synth(known, kind);
+    });
   }
 
   globalThis.PetSounds = { play, species: Object.keys(CALLS) };

@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
+    "sounds": "node scripts/fetch-pet-sounds.js",
     "dist": "electron-builder --win nsis --x64 --publish never",
     "dist:mac": "electron-builder --mac --publish never",
     "dist:linux": "electron-builder --linux --publish never"

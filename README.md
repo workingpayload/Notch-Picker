@@ -110,7 +110,7 @@ Small pixel-art pets react to your sessions: a **cat**, **dog**, **pig**, **shee
 - **Size:** *Match the notch* (default) or *Tiny* to *Huge*, independent of the notch.
 - **Speed:** *Lazy*, *Normal* or *Zippy* walking, running and climbing.
 - **Activity:** *Calm*, *Normal* or *Playful*: how often they roam and play, and how soon they nap when idle.
-- **Pet sounds** (off by default): a meow, woof, oink, baa, bleat, quack, squeak, yip or beep when a pet's session needs you and when you pet it, made on the fly (no sound files). They need the notch's *Sound* setting on and stay quiet during Focus Assist. *Listen* buttons play each one.
+- **Pet sounds** (off by default): a meow, woof, oink, baa, bleat, quack, squeak, yip or beep when a pet's session needs you and when you pet it. They are short CC0 / CC BY recordings found on [Openverse](https://openverse.org) and bundled with the app (credits in [`src/renderer/sounds/CREDITS.md`](src/renderer/sounds/CREDITS.md); `npm run sounds` re-downloads them, `npm run sounds -- --refresh` searches again); pets without a suitable recording (the fox and the bunny) use a call made on the fly. They need the notch's *Sound* setting on and stay quiet during Focus Assist. *Listen* buttons play each one.
 - **Levels:** each species' level and progress to the next.
 - **Session pets:** every live session with its colour tag and a species picker (*Automatic* or a fixed species), plus which sessions have no pet because of the limit, or are asleep because they're muted.
 

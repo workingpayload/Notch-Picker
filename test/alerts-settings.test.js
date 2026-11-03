@@ -22,6 +22,21 @@ test('attention alert fires once after the delay, and again for a new request', 
   assert.deepEqual(a.update([session({ since: T + 20000 })], T + 26000, settings).map((x) => x.kind), ['attention']);
 });
 
+test('an answered or abandoned alert is reported as ended, once', () => {
+  const a = new AlertTracker();
+  const [alert] = a.update([session()], T + 5000, settings);
+  assert.deepEqual(a.update([session()], T + 6000, settings), []);
+  assert.deepEqual(a.ended, []);
+  a.update([session({ status: 'tool', since: T + 7000 })], T + 7000, settings);
+  assert.deepEqual(a.ended, [alert.key]);
+  a.update([session({ status: 'tool', since: T + 7000 })], T + 8000, settings);
+  assert.deepEqual(a.ended, []);
+  // The session going away ends its alert too.
+  const [again] = a.update([session({ since: T + 9000 })], T + 15000, settings);
+  a.update([], T + 16000, settings);
+  assert.deepEqual(a.ended, [again.key]);
+});
+
 test('approval answered before the delay never alerts', () => {
   const a = new AlertTracker();
   a.update([session()], T + 2000, settings);

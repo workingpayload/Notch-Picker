@@ -71,6 +71,7 @@ const alerts = new AlertTracker();
 const git = new GitInfo();
 const idle = new IdleTracker();
 const liveNotifications = new Set();
+const alertNotifications = new Map(); // alert key -> its notification, closed when that state ends
 // Island extras: now playing, quick timer, file shelf (icons are looked up once per file), downloads.
 let media = null;
 let downloads = null;
@@ -1021,7 +1022,11 @@ function notify(alert, { webhook: sendHook = true } = {}) {
   const n = new Notification({ title, body, silent: true, timeoutType: alert.kind === 'done' ? 'default' : 'never' });
   // Keep a reference: garbage-collected notifications lose their click handler.
   liveNotifications.add(n);
-  const release = () => liveNotifications.delete(n);
+  if (alert.key) alertNotifications.set(alert.key, n);
+  const release = () => {
+    liveNotifications.delete(n);
+    if (alert.key && alertNotifications.get(alert.key) === n) alertNotifications.delete(alert.key);
+  };
   n.on('click', () => {
     release();
     if (alert.session && alert.session.id) focusSession(alert.session.id);
@@ -1034,7 +1039,17 @@ function notify(alert, { webhook: sendHook = true } = {}) {
   n.show();
 }
 
-// Adds time-based "stuck" flags and mute state, pushes changes to the notch and fires due alerts.
+// Takes down notifications for alerts whose state is over (the approval was answered, from the
+// notch or the terminal, or the session moved on): they never time out on their own.
+function closeEndedNotifications() {
+  for (const key of alerts.ended) {
+    const n = alertNotifications.get(key);
+    if (!n) continue;
+    alertNotifications.delete(key);
+    liveNotifications.delete(n);
+    n.close();
+  }
+} and mute state, pushes changes to the notch and fires due alerts.
 // Sessions with a request waiting in the notch (approve/answer from the notch) show as needing
 // approval or input: the CLI hasn't logged it yet because the hooks run before its own prompt.
 function withPendingApprovals(sessions) {
@@ -1292,6 +1307,7 @@ function refresh(force = false) {
     updateTray(decorated);
   }
   for (const alert of alerts.update(effective.filter((s) => !muted.has(s.id)), now, values)) notify(alert);
+  closeEndedNotifications();
   const idleNow = idle.update(decorated, now, extrasBusy());
   notches.setIdleHidden(values.autoHideWhenIdle && idleNow);
   // A session that starts (or stops) needing you brings back (or hides) a notch over tabs.

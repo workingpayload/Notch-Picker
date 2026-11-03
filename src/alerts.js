@@ -18,9 +18,13 @@ function stuckKind(session, now, settings) {
 class AlertTracker {
   constructor() {
     this.fired = new Set();
+    // Keys of alerts whose state ended in the last update (answered, moved on, session gone):
+    // their notifications are stale and can be taken down.
+    this.ended = [];
   }
 
-  // Returns alerts to show now; each (session, state, since, kind) fires at most once.
+  // Returns alerts to show now; each (session, state, since, kind) fires at most once. Each alert
+  // carries its key, which shows up in `ended` once that state is over.
   update(sessions, now, settings) {
     const alerts = [];
     const live = new Set();
@@ -31,7 +35,7 @@ class AlertTracker {
         live.add(key);
         if (!this.fired.has(key)) {
           this.fired.add(key);
-          alerts.push({ kind: 'attention', session: s });
+          alerts.push({ kind: 'attention', session: s, key });
         }
       }
       const stuck = stuckKind(s, now, settings);
@@ -40,12 +44,17 @@ class AlertTracker {
         live.add(key);
         if (!this.fired.has(key)) {
           this.fired.add(key);
-          alerts.push({ kind: stuck === 'tool' ? 'stuck-tool' : 'stuck-waiting', session: s });
+          alerts.push({ kind: stuck === 'tool' ? 'stuck-tool' : 'stuck-waiting', session: s, key });
         }
       }
     }
     // Forget keys for states that ended so memory doesn't grow.
-    for (const key of this.fired) if (!live.has(key)) this.fired.delete(key);
+    this.ended = [];
+    for (const key of this.fired) {
+      if (live.has(key)) continue;
+      this.fired.delete(key);
+      this.ended.push(key);
+    }
     // An overdue reminder already covers the plain attention alert; don't double-notify.
     const overdue = new Set(alerts.filter((a) => a.kind === 'stuck-waiting').map((a) => a.session.id));
     return alerts.filter((a) => !(a.kind === 'attention' && overdue.has(a.session.id)));

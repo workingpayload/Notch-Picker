@@ -186,7 +186,7 @@ Logs are re-read only when they change.
 ## Alerts and privacy
 
 - **Hidden from screen sharing by default.** The notch is excluded from Teams/Zoom shares, recordings and screenshots, but you still see it. You can turn this off in Settings or the tray menu.
-- **Desktop notifications** when a session needs approval or input and you haven't answered within *N* seconds (default 5). Click a notification to jump to that session's terminal. A short chime plays as well; turn it off with the *Sound* setting.
+- **Desktop notifications** when a session needs approval or input and you haven't answered within *N* seconds (default 5). Click a notification to jump to that session's terminal; it is taken down by itself once the session no longer needs you (answered from the notch or the terminal). A short chime plays as well; turn it off with the *Sound* setting.
 - **Stuck detection:**
   - A tool running longer than 10 minutes turns orange ("Stuck?").
   - An approval or input waiting longer than 3 minutes pulses red.

@@ -45,6 +45,8 @@ const SCHEMA = {
   hideInFullscreen: { type: 'boolean', default: true },
   // Step aside while a browser, terminal or editor in front has its tabs under the notch.
   hideOverTabs: { type: 'boolean', default: true },
+  // Resting the pointer at the top edge brings back a notch hidden while idle or over tabs.
+  revealAtTopEdge: { type: 'boolean', default: true },
   muteInFocusAssist: { type: 'boolean', default: true },
   hideFromScreenCapture: { type: 'boolean', default: true },
   pet: { type: 'boolean', default: true },

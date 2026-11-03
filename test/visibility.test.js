@@ -73,17 +73,17 @@ test('hide over tabs is on by default and can be turned off', () => {
   assert.equal(sanitize({ hideOverTabs: false }).hideOverTabs, false);
 });
 
-test('hiding the notch plays the retract animation first; showing again cancels it', (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+// A NotchManager over fake Electron windows; `fake.cursor` is where the pointer is.
+const fake = { cursor: { x: 0, y: 0 }, windows: [] };
+function loadNotches() {
   const display = { id: 1, bounds: { x: 0, y: 0, width: 1280, height: 800 } };
-  const windows = [];
   class FakeWindow {
     constructor() {
       this.visible = false;
       this.sent = [];
       this.handlers = {};
       this.webContents = { send: (channel, ...args) => this.sent.push([channel, ...args]) };
-      windows.push(this);
+      fake.windows.push(this);
     }
     setAlwaysOnTop() {}
     setIgnoreMouseEvents() {}
@@ -109,15 +109,27 @@ test('hiding the notch plays the retract animation first; showing again cancels 
         getPrimaryDisplay: () => display,
         getAllDisplays: () => [display],
         getDisplayNearestPoint: () => display,
-        getCursorScreenPoint: () => ({ x: 0, y: 0 }),
+        getCursorScreenPoint: () => fake.cursor,
       },
     },
   };
-  const { NotchManager } = require('../src/notches');
-  const m = new NotchManager({ webPreferences: {}, getSettings: () => ({ ...DEFAULTS }) });
+  return require('../src/notches');
+}
+
+// A shown notch on a 1280-wide display: its window spans x 440-840, the pill x 560-720.
+function newNotch(settings = {}) {
+  const { NotchManager } = loadNotches();
+  fake.cursor = { x: 0, y: 0 };
+  const m = new NotchManager({ webPreferences: {}, getSettings: () => ({ ...DEFAULTS, ...settings }) });
   m.sync();
-  const [w] = windows;
+  const w = fake.windows[fake.windows.length - 1];
   w.handlers['ready-to-show']();
+  return { m, w, n: m.notches.get('main') };
+}
+
+test('hiding the notch plays the retract animation first; showing again cancels it', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { m, w } = newNotch();
   assert.equal(w.visible, true);
   const visibility = () => w.sent.filter(([c]) => c === 'notch:visibility').map(([, v]) => v);
 
@@ -138,4 +150,77 @@ test('hiding the notch plays the retract animation first; showing again cancels 
   t.mock.timers.tick(500);
   assert.equal(w.visible, true);
   assert.deepEqual(visibility(), [true, false, true, false, true]);
+});
+
+test('pointing at the top edge brings back a notch that hid itself, until the pointer leaves', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { m, w, n } = newNotch();
+  n.hoverRect = { x: 120, y: 0, width: 160, height: 32, extra: [] };
+  const poll = (x, y, now) => {
+    fake.cursor = { x, y };
+    m.pollHover(now);
+  };
+  m.setIdleHidden(true);
+  t.mock.timers.tick(300);
+  assert.equal(w.visible, false);
+
+  // A quick touch (clicking a tab) doesn't bring it back; resting there does.
+  poll(640, 0, 1000);
+  poll(640, 0, 1200);
+  poll(640, 40, 1250);
+  poll(640, 0, 1300);
+  poll(640, 0, 1500);
+  assert.equal(w.visible, false);
+  poll(640, 1, 1600);
+  assert.equal(w.visible, true);
+  // Hovering keeps it; moving away hides it again.
+  poll(640, 10, 1660);
+  assert.equal(n.hovering, true);
+  poll(640, 400, 1720);
+  t.mock.timers.tick(300);
+  assert.equal(w.visible, false);
+  // Beside the pill's spot (even a small one) or below the edge does nothing.
+  for (const [x, y] of [[300, 0], [900, 0], [640, 5]]) {
+    poll(x, y, 2000);
+    poll(x, y, 2500);
+  }
+  assert.equal(w.visible, false);
+
+  // Hidden over tabs: same. Hidden for a full-screen app: not.
+  m.setHiddenDisplays(new Set([1]), new Set([1]));
+  m.setIdleHidden(false);
+  poll(640, 0, 3000);
+  poll(640, 0, 3500);
+  assert.equal(w.visible, false, 'full-screen app');
+  m.setHiddenDisplays(new Set([1]));
+  poll(640, 0, 4000);
+  poll(640, 0, 4300);
+  assert.equal(w.visible, true, 'over tabs');
+  poll(640, 400, 4400);
+  t.mock.timers.tick(300);
+  assert.equal(w.visible, false);
+  // A full-screen app taking over a peeking notch hides it.
+  poll(640, 0, 5000);
+  poll(640, 0, 5300);
+  assert.equal(w.visible, true);
+  m.setHiddenDisplays(new Set([1]), new Set([1]));
+  t.mock.timers.tick(300);
+  assert.equal(w.visible, false);
+});
+
+test('the top edge does nothing after the tray Hide or with the setting off', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const [settings, hide] of [
+    [{}, (m) => m.setUserHidden(true)],
+    [{ revealAtTopEdge: false }, (m) => m.setIdleHidden(true)],
+  ]) {
+    const { m, w } = newNotch(settings);
+    hide(m);
+    t.mock.timers.tick(300);
+    fake.cursor = { x: 640, y: 0 };
+    m.pollHover(1000);
+    m.pollHover(2000);
+    assert.equal(w.visible, false);
+  }
+  assert.equal(DEFAULTS.revealAtTopEdge, true);
 });

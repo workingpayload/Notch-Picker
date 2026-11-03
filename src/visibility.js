@@ -28,10 +28,13 @@ class IdleTracker {
 
 // Whether one notch window should be on screen.
 // Pinning (hotkey / pin button) overrides every hiding rule; an in-progress hover keeps an
-// idle-hidden notch from vanishing under the cursor.
-function shouldShow({ pinned, userHidden, displayHidden, idleHidden, hovering }) {
+// idle-hidden notch from vanishing under the cursor. `peeking`: brought back by resting the
+// pointer at the top edge; the caller never sets it for a notch hidden by a full-screen app.
+function shouldShow({ pinned, userHidden, displayHidden, idleHidden, hovering, peeking = false }) {
   if (pinned) return true;
-  if (userHidden || displayHidden) return false;
+  if (userHidden) return false;
+  if (peeking) return true;
+  if (displayHidden) return false;
   if (idleHidden && !hovering) return false;
   return true;
 }

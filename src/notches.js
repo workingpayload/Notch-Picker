@@ -10,6 +10,11 @@ const WIN_HEIGHT = 350;
 const EDGE_MARGIN = 12;
 // The renderer's retract animation (styles.css, body.retracted) runs before the window hides.
 const HIDE_ANIMATION_MS = 260;
+// Resting the pointer this long at the top edge, where the pill would be, brings back a notch
+// hidden automatically (idle or over tabs). Long enough that clicking a tab there doesn't.
+const REVEAL_DWELL_MS = 300;
+const REVEAL_EDGE_PX = 2;
+const REVEAL_MIN_SPAN = 160; // DIP, before zoom: a compact dot is too small a target
 
 // Owns the notch windows: one on the primary display, one that follows the cursor's display,
 // or one per display. Handles placement, hover hit-testing and full-screen hiding.
@@ -18,9 +23,10 @@ class NotchManager {
     this.webPreferences = webPreferences;
     this.getSettings = getSettings;
     this.onWindowCreated = onWindowCreated;
-    this.notches = new Map(); // slot -> { slot, win, displayId, hoverRect, hovering, ready }
+    this.notches = new Map(); // slot -> { slot, win, displayId, hoverRect, hovering, peeking, edgeSince, ready }
     this.userHidden = false;
     this.hiddenDisplays = new Set();
+    this.fullscreenDisplays = new Set(); // the hidden displays a full-screen app is on: no peeking
     this.idleHidden = false;
     this.pinned = false;
   }
@@ -144,7 +150,7 @@ class NotchManager {
       title: 'Notch Picker',
       webPreferences: { ...this.webPreferences, autoplayPolicy: 'no-user-gesture-required' },
     });
-    const n = { slot, win, displayId: null, hoverRect: null, hovering: false, ready: false, hideTimer: null };
+    const n = { slot, win, displayId: null, hoverRect: null, hovering: false, peeking: false, edgeSince: 0, ready: false, hideTimer: null };
     win.setAlwaysOnTop(true, 'screen-saver');
     // macOS: stay visible on every Space, including over full-screen apps' Spaces.
     if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -239,9 +245,13 @@ class NotchManager {
     this.applyVisibility();
   }
 
-  setHiddenDisplays(ids) {
-    if (ids.size === this.hiddenDisplays.size && [...ids].every((id) => this.hiddenDisplays.has(id))) return;
+  // `ids`: displays whose notch hides (full-screen apps and tabs); `fullscreen`: those of them
+  // hidden for a full-screen app, where pointing at the top edge doesn't bring the notch back.
+  setHiddenDisplays(ids, fullscreen = new Set()) {
+    const same = (a, b) => a.size === b.size && [...a].every((id) => b.has(id));
+    if (same(ids, this.hiddenDisplays) && same(fullscreen, this.fullscreenDisplays)) return;
     this.hiddenDisplays = ids;
+    this.fullscreenDisplays = fullscreen;
     this.applyVisibility();
   }
 
@@ -260,6 +270,7 @@ class NotchManager {
         displayHidden: this.hiddenDisplays.has(n.displayId),
         idleHidden: this.idleHidden,
         hovering: n.hovering,
+        peeking: n.peeking && !this.fullscreenDisplays.has(n.displayId),
       });
       if (show && n.hideTimer) {
         clearTimeout(n.hideTimer);
@@ -270,6 +281,7 @@ class NotchManager {
         n.win.setAlwaysOnTop(true, 'screen-saver');
         n.win.webContents.send('notch:visibility', true);
       } else if (!show && n.win.isVisible() && !n.hideTimer) {
+        n.peeking = false;
         if (n.hovering) {
           n.hovering = false;
           n.hoverRegion = null;
@@ -287,10 +299,21 @@ class NotchManager {
 
   // Forwarded mouse events are unreliable for click-through windows on Windows, so hover is
   // detected by polling the cursor against the pill bounds each renderer reports.
-  pollHover() {
+  pollHover(now = Date.now()) {
     const p = screen.getCursorScreenPoint();
     for (const n of this.notches.values()) {
-      if (n.win.isDestroyed() || !n.win.isVisible() || n.hideTimer || !n.hoverRect || n.dragging) continue;
+      if (n.win.isDestroyed() || n.dragging) continue;
+      if (!n.win.isVisible() || n.hideTimer) {
+        this.pollEdge(n, p, now);
+        continue;
+      }
+      if (!n.hoverRect) {
+        if (n.peeking && !this.atTopEdge(n, p)) {
+          n.peeking = false;
+          this.applyVisibility();
+        }
+        continue;
+      }
       const b = n.win.getBounds();
       const x = p.x - b.x;
       const y = p.y - b.y;
@@ -301,15 +324,53 @@ class NotchManager {
       const inExtra = !inPill && (r.extra || []).some((e) => x >= e.x && x <= e.x + e.width && y >= 0 && y <= e.y + e.height);
       const inside = inPill || inExtra;
       const region = inPill ? 'pill' : inExtra ? 'bubble' : null;
-      if (inside === n.hovering && region === n.hoverRegion) continue;
+      // A notch brought back from the top edge goes again once the pointer moves off it.
+      const endPeek = n.peeking && !inside && !this.atTopEdge(n, p);
+      if (endPeek) n.peeking = false;
+      if (inside === n.hovering && region === n.hoverRegion) {
+        if (endPeek) this.applyVisibility();
+        continue;
+      }
       const changed = inside !== n.hovering;
       n.hovering = inside;
       n.hoverRegion = region;
       if (changed) n.win.setIgnoreMouseEvents(!inside);
       n.win.webContents.send('notch:hover', inside, region);
-      // An idle-hidden notch stayed up only because it was hovered.
-      if (!inside && this.idleHidden) this.applyVisibility();
+      // An idle-hidden (or peeking) notch stayed up only because it was hovered.
+      if (!inside && (this.idleHidden || endPeek)) this.applyVisibility();
     }
+  }
+
+  // Whether the pointer is on the top edge of the notch's display, within the pill's span (the
+  // last one its renderer reported, or the whole window before that), widened for a small pill.
+  atTopEdge(n, p) {
+    const display = screen.getAllDisplays().find((d) => d.id === n.displayId);
+    if (!display || p.y > display.bounds.y + REVEAL_EDGE_PX || p.y < display.bounds.y) return false;
+    const b = n.win.getBounds();
+    const r = n.hoverRect && n.hoverRect.width > 0 ? n.hoverRect : { x: 0, width: b.width };
+    const center = b.x + r.x + r.width / 2;
+    const half = Math.max(r.width, REVEAL_MIN_SPAN * this.zoom()) / 2;
+    return p.x >= center - half && p.x <= center + half;
+  }
+
+  // For a notch hidden automatically (idle, or over tabs; not for a full-screen app or the tray's
+  // Hide), resting the pointer at the top edge where the pill would be brings it back.
+  pollEdge(n, p, now) {
+    const revealable =
+      n.ready &&
+      this.getSettings().revealAtTopEdge &&
+      !this.userHidden &&
+      !this.fullscreenDisplays.has(n.displayId) &&
+      (this.idleHidden || this.hiddenDisplays.has(n.displayId));
+    if (!revealable || !this.atTopEdge(n, p)) {
+      n.edgeSince = 0;
+      return;
+    }
+    if (!n.edgeSince) n.edgeSince = now;
+    if (now - n.edgeSince < REVEAL_DWELL_MS) return;
+    n.edgeSince = 0;
+    n.peeking = true;
+    this.applyVisibility();
   }
 
   reassertTopmost() {

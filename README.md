@@ -209,7 +209,7 @@ Open *Settings…* from the tray, or run `npm start -- --settings`. Settings are
 
 ## Install
 
-The app icon (`build/icon.png`, `build/icon.ico`) is generated from the pet sprites by `python build/make-icon.py build` (needs Pillow).
+The app icon (`build/icon.png`, `build/icon.ico`) is drawn by `python build/make-icon.py build` (needs Pillow): a navy tile with the notch pill (status light, waveform) and a clay-shaded tabby peeking over it; 16–32 px sizes zoom in and drop the fine details. Set `ICON_PREVIEW=1` to also write preview sheets.
 
 ```powershell
 npm install

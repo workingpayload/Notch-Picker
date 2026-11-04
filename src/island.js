@@ -204,6 +204,22 @@ function mediaPosition(media, now = Date.now()) {
   return media.durationMs > 0 ? Math.min(pos, media.durationMs) : pos;
 }
 
+// Index of the synced lyric line playing at `posMs` (lines sorted by `t`), or -1 before the first.
+function lyricIndexAt(lines, posMs) {
+  if (!Array.isArray(lines) || !lines.length || !Number.isFinite(posMs)) return -1;
+  let lo = 0;
+  let hi = lines.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].t <= posMs) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
+}
+
 // Elapsed / remaining time of the quick timer at `now`.
 function timerElapsed(timer, now = Date.now()) {
   if (!timer) return 0;
@@ -306,6 +322,7 @@ function downloadBanner(ev) {
     prettyAppName,
     mediaPlaying,
     mediaPosition,
+    lyricIndexAt,
     timerRunning,
     timerElapsed,
     timerRemaining,

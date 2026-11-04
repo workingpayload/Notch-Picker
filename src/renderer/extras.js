@@ -55,7 +55,7 @@ function iconButton(name, label, onClick, { disabled = false, cls = '' } = {}) {
   return b;
 }
 
-function renderMediaCard(m) {
+function renderMediaCard(m, lyricsBox = null) {
   const card = el('div', `media-card${m.status === 'playing' ? ' playing' : ''}`);
   setStatusClass(card, 'media');
   if (m.art) {
@@ -90,8 +90,94 @@ function renderMediaCard(m) {
     iconButton('next', 'Next', () => window.notchApi.mediaCommand('next'), { disabled: !m.canNext })
   );
   card.append(info, controls);
+  if (lyricsBox) {
+    card.classList.add('has-lyrics');
+    card.append(lyricsBox);
+  }
   card.setAttribute('aria-label', `Now playing: ${[m.title, m.artist, m.app].filter(Boolean).join(', ')}${playing ? '' : ' (paused)'}`);
   return card;
+}
+
+// ---- Lyrics (Settings → Dynamic Island → Lyrics) ----
+// Synced lyrics scroll in a three-line strip under the media card's controls; the lines are drawn
+// once per track and the highlight follows the playback position. Unsynced lyrics are a static
+// list to scroll. With "Lyrics in the pill" the current line also replaces the title in the pill.
+
+// Lines feel late when they appear exactly on time.
+const LYRICS_LEAD_MS = 200;
+let lyricsInPill = false;
+let lyricsOffsetMs = 0;
+const lyricsView = { key: null, node: null, track: null, index: null, scroll: 0 };
+
+function currentLyrics() {
+  const l = features.media && extras.media && extras.lyrics;
+  return l && l.status === 'found' ? l : null;
+}
+
+function lyricsPosition(now) {
+  return window.NotchIsland.mediaPosition(extras.media, now) + LYRICS_LEAD_MS + lyricsOffsetMs;
+}
+
+function buildLyrics(l) {
+  const box = el('div', `lyrics ${l.instrumental ? 'instrumental' : l.synced ? 'synced' : 'plain'}`);
+  if (l.instrumental) {
+    box.append(el('p', 'current', '♪  Instrumental  ♪'));
+    return box;
+  }
+  const track = el('div', 'lyrics-track');
+  for (const line of l.lines) track.append(el('p', line.text ? '' : 'gap', line.text || '♪'));
+  box.append(track);
+  if (l.synced) {
+    // Screen readers would announce every line change; the title is in the card's label already.
+    box.setAttribute('aria-hidden', 'true');
+  } else {
+    box.tabIndex = 0;
+    box.setAttribute('aria-label', 'Lyrics');
+    box.addEventListener('scroll', () => (lyricsView.scroll = box.scrollTop));
+  }
+  return box;
+}
+
+// The lyrics element for the current track (kept across media card rebuilds), or null.
+function lyricsNode() {
+  const l = currentLyrics();
+  const key = l ? `${l.key}|${l.synced}|${l.instrumental}|${l.lines.length}` : null;
+  if (key !== lyricsView.key) {
+    lyricsView.key = key;
+    lyricsView.node = l ? buildLyrics(l) : null;
+    lyricsView.track = lyricsView.node && lyricsView.node.querySelector('.lyrics-track');
+    lyricsView.index = null;
+    lyricsView.scroll = 0;
+  }
+  return lyricsView.node;
+}
+
+// Highlights the current line and centres it in the strip.
+function updateLyricsStrip(now) {
+  const l = currentLyrics();
+  const node = lyricsView.node;
+  if (!l || !l.synced || !node || !node.isConnected || !lyricsView.track) return;
+  node.classList.toggle('paused', extras.media.status !== 'playing');
+  if (!node.clientHeight) return;
+  const rows = lyricsView.track.children;
+  const i = window.NotchIsland.lyricIndexAt(l.lines, lyricsPosition(now));
+  if (i !== lyricsView.index) {
+    if (lyricsView.index !== null && lyricsView.index >= 0 && rows[lyricsView.index]) rows[lyricsView.index].classList.remove('current');
+    if (i >= 0) rows[i].classList.add('current');
+    lyricsView.index = i;
+  }
+  const row = rows[Math.max(0, i)];
+  const offset = Math.max(0, row.offsetTop + row.offsetHeight / 2 - node.clientHeight / 2);
+  const transform = `translateY(${-Math.round(offset)}px)`;
+  if (lyricsView.track.style.transform !== transform) lyricsView.track.style.transform = transform;
+}
+
+// The line for the pill while synced lyrics play (null: show the title as usual).
+function pillLyric(now) {
+  const l = lyricsInPill && currentLyrics();
+  if (!l || !l.synced || extras.media.status !== 'playing') return null;
+  const i = window.NotchIsland.lyricIndexAt(l.lines, lyricsPosition(now));
+  return i >= 0 ? l.lines[i].text || '♪' : null;
 }
 
 // The running timer as a chip in the panel header (the ⏱ button next to it opens the menu).
@@ -318,7 +404,10 @@ function renderExtras() {
   const m = features.media && extras.media;
   if (m) {
     const art = m.art ? `${m.art.length}:${m.art.slice(-40)}` : '';
-    parts.push(cached(mediaCache, JSON.stringify({ ...m, art }), () => renderMediaCard(m)));
+    // The position moves on its own (liveTickExtras): a new report doesn't need a new card.
+    const { positionMs, updatedAt, ...shown } = m;
+    const lyricsBox = lyricsNode();
+    parts.push(cached(mediaCache, JSON.stringify({ ...shown, art, lyrics: lyricsView.key }), () => renderMediaCard(m, lyricsBox)));
   }
   const dl = features.downloads ? extras.downloads : [];
   if (dl.length) parts.push(updateDownloads(dl));
@@ -329,7 +418,12 @@ function renderExtras() {
   }
   extrasEl.hidden = !parts.length;
   const current = [...extrasEl.children];
-  if (current.length !== parts.length || current.some((n, i) => n !== parts[i])) extrasEl.replaceChildren(...parts);
+  if (current.length !== parts.length || current.some((n, i) => n !== parts[i])) {
+    extrasEl.replaceChildren(...parts);
+    // Moving the lyrics into a rebuilt card loses where they were scrolled to.
+    const box = lyricsView.node;
+    if (box && box.isConnected && box.scrollTop !== lyricsView.scroll) box.scrollTop = lyricsView.scroll;
+  }
   timerButton.hidden = !features.timer;
   renderTimerChip(features.timer ? extras.timer : null);
   liveTickExtras(Date.now());
@@ -353,6 +447,7 @@ function liveTickExtras(now) {
     progress.querySelector('.pos').textContent = formatClock(pos);
     progress.querySelector('.meter b').style.width = `${Math.min(100, (pos / m.durationMs) * 100)}%`;
   }
+  if (m) updateLyricsStrip(now);
   const t = features.timer && extras.timer;
   if (t && !timerChip.hidden) {
     timerChip.querySelector('.clock').textContent = timerClock(t, now);
@@ -406,7 +501,7 @@ let lastTrackKey = null;
 const extrasLoadedAt = Date.now();
 
 function applyExtras(next) {
-  extras = { media: null, timer: null, shelf: [], downloads: [], ...(next || {}) };
+  extras = { media: null, lyrics: null, timer: null, shelf: [], downloads: [], ...(next || {}) };
   const m = extras.media;
   // A new track while playing gets a short "now playing" banner.
   if (m && m.status === 'playing') {

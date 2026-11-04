@@ -1992,6 +1992,84 @@ body.island-style .bubble .shoulder.right {
   gap: 2px;
 }
 
+/* Lyrics under the media card's controls: three lines, the current one centred and bright. */
+.media-card.has-lyrics {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.lyrics {
+  flex: 1 0 100%;
+  position: relative;
+  height: 54px;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 16px;
+  text-align: center;
+  color: var(--dim);
+  mask-image: linear-gradient(transparent, #000 28%, #000 72%, transparent);
+}
+
+.lyrics-track {
+  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.lyrics p {
+  margin: 0;
+  padding: 1px 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  opacity: 0.55;
+  transition: opacity 0.3s ease, color 0.3s ease;
+}
+
+.lyrics p.gap {
+  letter-spacing: 0.3em;
+}
+
+.lyrics p.current {
+  opacity: 1;
+  color: var(--fg);
+  font-weight: 600;
+  text-shadow: 0 0 12px color-mix(in srgb, var(--media) 45%, transparent);
+}
+
+.lyrics.paused p.current {
+  color: var(--dim);
+  text-shadow: none;
+}
+
+.lyrics.plain {
+  height: 72px;
+  overflow-y: auto;
+  text-align: left;
+  mask-image: none;
+}
+
+.lyrics.plain p {
+  opacity: 0.85;
+}
+
+.lyrics.instrumental {
+  height: auto;
+  mask-image: none;
+}
+
+.lyrics.instrumental p {
+  color: var(--media);
+}
+
+/* Lyrics in the pill: the line takes the room of the title and the gap (classic: the detail). */
+body.island-style .notch.lyric-pill .bar .label {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  color: var(--fg);
+  font-weight: 500;
+}
+
 .icon-btn {
   width: 26px;
   height: 26px;

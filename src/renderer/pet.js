@@ -108,6 +108,7 @@ function draw() {
   const confettiFrame = view.effect === 'confetti' && !still ? Math.floor(Date.now() / 60) : 0;
   const sweatFrame = view.sweat && anchor && !still ? Math.floor(Date.now() / 250) % 3 : 0;
   const sign = view.sign && !view.origin ? view.sign : null;
+  const say = view.say && !view.origin ? view.say : null;
 
   const origin = view.origin;
   const key = [
@@ -127,6 +128,7 @@ function draw() {
     view.carry,
     view.badge,
     sign ? JSON.stringify(sign) : '',
+    say ? JSON.stringify(say) : '',
   ].join('|');
   if (key === lastKey) return;
   lastKey = key;
@@ -146,6 +148,7 @@ function draw() {
   // Anchors are for a pet facing right in its 20-wide sprite; mirror them for one facing left.
   const at = (p, w = 1) => ({ x: ox + (view.facing < 0 ? SPRITE_W - w - p[0] : p[0]), y: oy + p[1] });
   if (sign) drawSign(sign, dpr, k);
+  if (say) drawSay(say, dpr, k);
   if (view.badge && anchor && anchor.badge) {
     const spot = at(anchor.badge, BADGE[0].length);
     const color = BADGE_COLORS[view.badge];
@@ -217,6 +220,45 @@ function drawSign(sign, dpr, k) {
   }
 }
 
+// The lyric line a pet sings: a speech bubble above its head with a short tail down to it.
+const SAY_COLORS = { fill: '#ffffff', edge: '#4a4a52', text: '#1c1c1e' };
+function drawSay(say, dpr, k) {
+  const x = say.x * dpr;
+  const y = say.y * dpr;
+  const w = say.width * dpr;
+  const h = say.height * dpr;
+  const cx = x + w / 2;
+  const tip = Math.max(y + h + 3 * dpr, k.y0 + (SPRITE_Y + 1) * k.y);
+  const tail = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - 5 * dpr, y + h - dpr);
+    ctx.lineTo(cx + 5 * dpr, y + h - dpr);
+    ctx.lineTo(cx + 1 * dpr, tip);
+    ctx.closePath();
+  };
+  ctx.fillStyle = SAY_COLORS.edge;
+  roundRect(x, y, w, h, 7 * dpr);
+  ctx.fill();
+  tail();
+  ctx.fill();
+  ctx.fillStyle = SAY_COLORS.fill;
+  roundRect(x + dpr, y + dpr, w - 2 * dpr, h - 2 * dpr, 6 * dpr);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(0, -dpr);
+  tail();
+  ctx.restore();
+  ctx.fill();
+  const pad = 6 * dpr;
+  const size = say.font * dpr;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'center';
+  ctx.font = `italic ${size}px 'Segoe UI', system-ui, sans-serif`;
+  ctx.fillStyle = SAY_COLORS.text;
+  say.lines.forEach((line, i) => ctx.fillText(fit(line, w - 2 * pad), cx, y + pad * 0.6 + i * (size + 3 * dpr)));
+  ctx.textAlign = 'left';
+}
+
 function roundRect(x, y, w, h, r) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
@@ -238,6 +280,12 @@ function fit(text, width) {
 // Whether a point (window DIPs) is on the sign.
 function onSign(x, y) {
   const s = view.sign;
+  return !!s && !view.origin && x >= s.x && x < s.x + s.width && y >= s.y && y < s.y + s.height;
+}
+
+// Whether a point is on the lyric speech bubble (clicks there do nothing).
+function onSay(x, y) {
+  const s = view.say;
   return !!s && !view.origin && x >= s.x && x < s.x + s.width && y >= s.y && y < s.y + s.height;
 }
 
@@ -277,6 +325,7 @@ canvas.addEventListener('pointerdown', (e) => {
     window.petApi.sign();
     return;
   }
+  if (onSay(e.clientX, e.clientY)) return;
   pressed = true;
   canvas.setPointerCapture(e.pointerId);
   window.petApi.pointer('down', e.pointerType, at(e));

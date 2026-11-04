@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { BrowserWindow, screen } = require('electron');
-const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors, petSign, petStrain, stepBall } = require('./pet');
+const { PetBrain, petMood, sessionMood, homeFor, choosePetSessions, pickSpecies, windowFloors, petSign, petStrain, stepBall, musicMoment, sayLines } = require('./pet');
 const { SPRITE_W, SPRITE_H, WIN_COLS, WIN_ROWS, SPECIES, COLLAR_COLORS, BALL, hitRects, petCell } = require('./pet-sprites');
 const { isNight } = require('./wellbeing');
 
@@ -186,19 +186,21 @@ class Pet {
     this.strain = strain || { sweat: false, limp: false };
   }
 
-  // The sign's board (DIPs), sized for its text, or null.
+  // The board above the pet (DIPs), sized for its text, or null: the sign it holds up while its
+  // session needs you, or the speech bubble with the lyric line it sings.
   signSize(sign) {
     if (!sign) return null;
-    const chars = Math.max(sign.title.length, sign.text.length);
-    const lines = sign.text ? 2 : 1;
+    const texts = sign.lines || [sign.title, sign.text].filter(Boolean);
+    const chars = Math.max(0, ...texts.map((t) => t.length));
+    const lines = Math.max(1, texts.length);
     return {
-      width: Math.round(Math.min(220, Math.max(90, SIGN_PAD * 2 + chars * SIGN_FONT * 0.56))),
+      width: Math.round(Math.min(220, Math.max(sign.lines ? 60 : 90, SIGN_PAD * 2 + chars * SIGN_FONT * 0.56))),
       height: Math.round(SIGN_PAD + lines * (SIGN_FONT + 3) + 2),
     };
   }
 
-  // This pet's window: the shared size, made wider and taller while it holds up a sign.
-  size(sign = this.view && this.view.sign) {
+  // This pet's window: the shared size, made wider and taller while it holds up a sign or sings.
+  size(sign = this.view && (this.view.sign || this.view.say)) {
     const base = this.m.size();
     const board = this.signSize(sign);
     if (!board) return base;
@@ -291,13 +293,14 @@ class Pet {
   // moment after the pet moves to a display with different scaling.
   applyShape(w, view, now = 0) {
     const cell = this.m.cell();
-    const size = this.size(view.sign);
+    const board = view.sign || view.say;
+    const size = this.size(board);
     const { width, height } = size;
     const box = this.m.boxSize();
     const ox = (width - box.width) / 2;
     const oy = height - box.height;
     const rects = hitRects(view).map((r) => ({ x: ox + r.x * cell, y: oy + r.y * cell, width: r.width * cell, height: r.height * cell }));
-    const sign = this.signRect(view.sign, size);
+    const sign = this.signRect(board, size);
     if (sign) rects.push(sign);
     const key = JSON.stringify(rects);
     if (key === this.lastShape && now >= this.reshapeUntil) return;
@@ -396,13 +399,16 @@ class Pet {
       strain: this.strain,
       sign: values.petSigns ? this.sign : null,
       ball: this.m.ballFor(this),
+      music: this.m.musicNow(now),
+      say: this.m.sayFor(this, now),
     });
     this.view = view;
     if (values.petPlay) this.m.bump(this, now);
 
     // The window is at least the pet's box; the box sits at its bottom-centre (the pet's feet at
-    // the window's bottom edge). Holding up a sign makes it wider and taller.
-    const size = this.size(view.sign);
+    // the window's bottom edge). Holding up a sign or singing makes it wider and taller.
+    const board = view.sign || view.say;
+    const size = this.size(board);
     const { width, height } = size;
     const winBox = { x: Math.round(view.x - width / 2), y: Math.round(view.y - height), width, height };
     const petBox = this.m.boxSize();
@@ -422,6 +428,7 @@ class Pet {
       carry: view.carry,
       sweat: view.sweat,
       sign: view.sign ? { ...view.sign, ...this.signRect(view.sign, size), font: SIGN_FONT } : null,
+      say: view.say ? { ...view.say, ...this.signRect(view.say, size), font: SIGN_FONT } : null,
       ...this.levelPayload(values),
     };
 
@@ -530,6 +537,27 @@ class PetManager {
     this.windowFloors = []; // tops of app windows pets can walk on
     this.nextPlayAt = Date.now() + PLAY_EVERY_MS / 2;
     this.playTimer = null;
+    this.music = null; // now playing and its lyrics while "Sing and dance to music" is on
+  }
+
+  // { media, lyrics, offsetMs } from the media monitor and lyrics service, or null.
+  setMusic(music) {
+    this.music = music && music.media ? music : null;
+  }
+
+  musicNow(now) {
+    return this.music ? musicMoment(this.music, now) : null;
+  }
+
+  // The lyric line for a pet to sing, or null: only one pet sings, the most urgent session's of
+  // those dancing on a floor.
+  sayFor(pet, now) {
+    const moment = this.musicNow(now);
+    if (!moment || !moment.line) return null;
+    const singer = [...this.pets.values()]
+      .filter((p) => p.alive() && p.ready && p.brain.isDancing() && !p.brain.leaving)
+      .sort((a, b) => a.rank - b.rank)[0];
+    return singer === pet ? { lines: sayLines(moment.line) } : null;
   }
 
   all() {

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, powerMonitor, screen, shell } = require('electron');
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, Menu, net, Notification, Tray, nativeImage, nativeTheme, powerMonitor, screen, shell } = require('electron');
 const { SessionWatcher, copilotHome, compareSessions } = require('./watcher');
 const { WslLocator, vscodeWslUrl } = require('./wsl');
 const { AgentSessionWatcher, agentLogFolder } = require('./agent-watcher');
@@ -29,6 +29,7 @@ const { SPECIES_NAMES } = require('./pet-sprites');
 const { PetStats, XP, badgeTier } = require('./pet-stats');
 const { Wellbeing } = require('./wellbeing');
 const { MediaMonitor } = require('./media');
+const { LyricsService } = require('./lyrics');
 const { DownloadMonitor, installExtension } = require('./download-monitor');
 const { QuickTimer, describeDuration, TIMER_PRESETS_MIN } = require('./timer');
 const { Shelf, isOpenable } = require('./shelf');
@@ -74,6 +75,7 @@ const liveNotifications = new Set();
 const alertNotifications = new Map(); // alert key -> its notification, closed when that state ends
 // Island extras: now playing, quick timer, file shelf (icons are looked up once per file), downloads.
 let media = null;
+let lyrics = null;
 let downloads = null;
 let shelf = null;
 let lastExtras = '';
@@ -1080,6 +1082,7 @@ function extrasState() {
   const values = settings.get();
   return {
     media: values.mediaControls && media ? media.state : null,
+    lyrics: values.mediaControls && values.mediaLyrics && lyrics ? lyrics.state : null,
     timer: values.quickTimer ? quickTimer.snapshot() : null,
     downloads: values.downloads && downloads ? downloads.state : [],
     shelf:
@@ -1093,12 +1096,24 @@ function extrasState() {
 }
 
 function sendExtras(force = false) {
+  if (pet) pet.setMusic(petMusicState());
   if (!notches) return;
   const state = extrasState();
   const json = JSON.stringify(state);
   if (!force && json === lastExtras) return;
   lastExtras = json;
   send('extras:update', state);
+}
+
+// What the pets dance and sing to (pet setting "Sing and dance to music"), or null.
+function petMusicState() {
+  const values = settings.get();
+  if (!values.pet || !values.petMusic || !values.mediaControls || !media) return null;
+  return {
+    media: media.state,
+    lyrics: values.mediaLyrics && lyrics ? lyrics.state : null,
+    offsetMs: values.lyricsOffsetMs,
+  };
 }
 
 // Something besides sessions keeps the notch busy (for auto-hide when idle).
@@ -1195,12 +1210,40 @@ function syncMedia(values) {
   if (values.mediaControls && process.platform === 'win32') {
     if (!media) {
       media = new MediaMonitor({ log });
-      media.on('change', () => sendExtras());
+      media.on('change', (state) => {
+        if (lyrics) lyrics.track(state);
+        sendExtras();
+      });
     }
     media.start();
   } else if (media) {
     media.stop();
   }
+  syncLyrics(values);
+}
+
+// Lyrics are looked up only while both Now playing and Lyrics are on; turning them off forgets
+// the cached songs.
+function syncLyrics(values) {
+  const on = values.mediaControls && values.mediaLyrics && process.platform === 'win32';
+  if (!on) {
+    if (lyrics) {
+      lyrics.stop();
+      lyrics.clearCache();
+      lyrics = null;
+    }
+    return;
+  }
+  if (!lyrics) {
+    lyrics = new LyricsService({
+      fetch: (url, options) => net.fetch(url, options),
+      cacheFile: path.join(app.getPath('userData'), 'lyrics-cache.json'),
+      log,
+    });
+    lyrics.on('change', () => sendExtras());
+  }
+  lyrics.setOptions({ allPlayers: values.lyricsAllPlayers });
+  lyrics.track(media ? media.state : null);
 }
 
 async function loadShelfIcons() {
@@ -1768,6 +1811,7 @@ app.on('before-quit', () => {
   if (watcher) watcher.stop();
   if (fullscreen) fullscreen.stop();
   if (media) media.stop();
+  if (lyrics) lyrics.stop();
   if (downloads) downloads.stop();
   quickTimer.dispose();
 });

@@ -452,3 +452,77 @@ test('a level-up hops with a star; confetti makes the whole box drawable', () =>
   const { hitRects, WIN_COLS, WIN_ROWS } = require('../src/pet-sprites');
   assert.deepEqual(hitRects({ anim: 'party', facing: 1, bubble: null, effect: 'confetti' }), [{ x: 0, y: 0, width: WIN_COLS, height: WIN_ROWS }]);
 });
+
+test('music for the pets: dance on lines, sway in intros, breaks and instrumentals, chorus from its second time', () => {
+  const { musicMoment, sayLines, chorusStarts } = require('../src/pet');
+  const lines = [
+    { t: 10000, text: 'first verse line' },
+    { t: 14000, text: 'here comes the chorus' },
+    { t: 18000, text: 'sing it loud tonight' },
+    { t: 22000, text: '' },
+    { t: 30000, text: 'second verse line' },
+    { t: 34000, text: 'here comes the chorus' },
+    { t: 38000, text: 'sing it loud tonight' },
+    { t: 42000, text: 'a brand new line' },
+    { t: 46000, text: 'second verse line' },
+    { t: 48000, text: 'yeah' },
+    { t: 50000, text: 'yeah' },
+  ];
+  assert.deepEqual(chorusStarts(lines), [-1, -1, -1, -1, -1, 5, 5, -1, -1, -1, -1], 'a lone repeat or "yeah" is no chorus');
+  const media = (positionMs, status = 'playing') => ({ title: 'Song', artist: 'Band', status, positionMs, updatedAt: 1000, durationMs: 200000 });
+  const lyrics = { status: 'found', synced: true, instrumental: false, lines };
+  const at = (pos, extra = {}) => musicMoment({ media: media(pos), lyrics, offsetMs: 0, ...extra }, 1000);
+  assert.deepEqual(at(5000), { groove: 'sway', beat: null, chorus: null, line: null }, 'intro');
+  assert.deepEqual(at(14500), { groove: 'dance', beat: 1, chorus: null, line: 'here comes the chorus' });
+  assert.equal(at(13850).beat, 1, 'lines show 200 ms early');
+  assert.equal(at(13850, { offsetMs: -500 }).beat, 0, 'the timing setting shifts them');
+  assert.equal(at(23000).groove, 'sway', 'an empty line is a break');
+  assert.equal(at(35000).chorus, 5);
+  assert.equal(at(58000).groove, 'sway', 'outro: the last line is long over');
+  assert.equal(musicMoment({ media: media(35000), lyrics, offsetMs: 0 }, 4000).beat, 6, 'the position moves on while playing');
+  assert.equal(musicMoment({ media: media(14500, 'paused'), lyrics }, 1000), null);
+  assert.deepEqual(musicMoment({ media: media(1000), lyrics: null }, 1000), { groove: 'dance', beat: null, chorus: null, line: null }, 'no lyrics: just dance');
+  assert.equal(musicMoment({ media: media(1000), lyrics: { status: 'found', instrumental: true, lines: [] } }, 1000).groove, 'sway');
+
+  assert.deepEqual(sayLines('short line'), ['short line']);
+  const long = sayLines('I keep on singing this line that goes on and on and on for far too long to fit');
+  assert.equal(long.length, 2);
+  assert.ok(long.every((l) => l.length <= 30), JSON.stringify(long));
+  assert.ok(long[1].endsWith('…'));
+});
+
+test('pets dance to music: a hop and a turn on each new line, a backflip for the chorus, then back to normal', () => {
+  const brain = new PetBrain({ random: () => 0.9 });
+  const input = (music, extra = {}) => ({ placement: 'taskbar', mood: 'idle', chase: false, music, ...extra });
+  run(brain, 0, 100, input(null));
+  const dance = (beat, chorus = null) => ({ groove: 'dance', beat, chorus, line: 'la la la' });
+  let view = run(brain, 133, 400, input(dance(null)));
+  assert.deepEqual([view.anim, view.bubble], ['dance', 'note']);
+  const facing = view.facing;
+  view = brain.step(433, { ground, ...input(dance(3)) });
+  assert.deepEqual([view.anim, view.bubble, view.facing], ['beat', 'note', -facing]);
+  view = run(brain, 466, 1200, input(dance(3)));
+  assert.equal(view.anim, 'dance', 'the hop is short');
+  view = brain.step(1233, { ground, ...input(dance(4, 4)), say: { lines: ['la la la'] } });
+  assert.deepEqual([view.anim, view.effect], ['party', 'confetti']);
+  assert.equal(view.say, null, 'no speech bubble mid-backflip');
+  view = run(brain, 1266, 4500, input(dance(5, 4), { say: { lines: ['la la la'] } }));
+  assert.deepEqual(view.say, { lines: ['la la la'] }, 'the singer shows the line');
+  view = brain.step(4533, { ground, ...input(dance(6, 6)) });
+  assert.notEqual(view.anim, 'party', 'at most one chorus backflip in 20 s');
+  view = run(brain, 4566, 5600, input({ groove: 'sway', beat: null, chorus: null, line: null }));
+  assert.deepEqual([view.anim, view.bubble], ['sway', 'note']);
+  view = run(brain, 5633, 9600, input(null));
+  assert.notEqual(view.anim, 'sway', 'stops shortly after the music');
+  assert.notEqual(view.anim, 'dance');
+
+  const alert = new PetBrain({ random: () => 0.9 });
+  view = run(alert, 0, 1000, input(dance(1), { mood: 'alert' }));
+  assert.equal(view.anim, 'alert', 'a session needing you comes first');
+  const muted = new PetBrain({ random: () => 0.9 });
+  view = run(muted, 0, 1000, input(dance(1), { mood: 'asleep' }));
+  assert.equal(view.anim, 'sleep');
+  const hanging = new PetBrain({ random: () => 0.9 });
+  view = run(hanging, 0, 3000, input(dance(1), { perch, placement: 'notch' }));
+  assert.deepEqual([view.anim, view.bubble, view.say], ['hang', 'note', null], 'on the notch: just a note');
+});

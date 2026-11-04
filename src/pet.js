@@ -43,6 +43,14 @@ const HOP_REACH = 140; // how far sideways a floor may be to hop onto it
 const KNOCK_VX = 320; // a pet knocked over by a flying one tumbles this fast...
 const KNOCK_VY = 520; // ...and this high
 const PLAYFUL = new Set(['idle', 'working', 'none']);
+// Music (pet setting "Sing and dance to music").
+const LYRIC_LEAD_MS = 200; // lines show a little early, like in the notch
+const MUSIC_BREAK_MS = 6000; // a line held this long with the next one still far off is a break
+const BEAT_MS = 500; // the little hop on a new line
+const CHORUS_PARTY_GAP_MS = 20000; // at most one chorus flip this often
+const SWAY_TURN_MS = 1600;
+const SAY_LINE = 30; // characters per line of the sung lyric (two lines at most)
+const DANCE_HOLD_MS = 1500; // the groove lasts this long after the music's last report
 // Activity setting: how often a pet sets off roaming, how long it sits, when an idle roamer naps.
 const ACTIVITY = {
   calm: { roam: 0.4, sit: 1.5, sleepAfter: 30000 },
@@ -150,6 +158,94 @@ function todosJustFinished(prev, next) {
   return prev !== undefined && finished(next) && !finished(prev);
 }
 
+// For each synced lyric line, the first line of its chorus block, or -1: a chorus is a run of two
+// or more lines that each already appeared earlier in the song (so it is found from its second
+// time on). Short lines ("oh", "yeah") don't count as repeats.
+const chorusCache = new WeakMap();
+function chorusStarts(lines) {
+  if (chorusCache.has(lines)) return chorusCache.get(lines);
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const seen = new Set();
+  const repeat = lines.map((l) => {
+    const n = norm(l.text);
+    const again = n.length >= 8 && seen.has(n);
+    if (n) seen.add(n);
+    return again;
+  });
+  const starts = new Array(lines.length).fill(-1);
+  for (let i = 0; i < lines.length; ) {
+    if (!repeat[i]) {
+      i++;
+      continue;
+    }
+    let end = i;
+    while (end + 1 < lines.length && repeat[end + 1]) end++;
+    if (end > i) for (let k = i; k <= end; k++) starts[k] = i;
+    i = end + 1;
+  }
+  chorusCache.set(lines, starts);
+  return starts;
+}
+
+function lyricIndex(lines, pos) {
+  let lo = 0;
+  let hi = lines.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].t <= pos) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
+}
+
+// What the music is doing for the pets at `now`, or null when nothing plays.
+// music: { media: { status, positionMs, updatedAt, durationMs }, lyrics: { status, synced,
+// instrumental, lines } | null, offsetMs }. Returns { groove: 'dance' | 'sway', beat, chorus, line }:
+// with synced lyrics `beat` is the line's index (a new beat is a new line), `chorus` the chorus
+// block it belongs to (or null) and `line` its text; intros, breaks, outros and instrumentals sway.
+function musicMoment(music, now) {
+  const m = music && music.media;
+  if (!m || m.status !== 'playing' || !(m.title || m.artist)) return null;
+  const l = music.lyrics && music.lyrics.status === 'found' ? music.lyrics : null;
+  const calm = { groove: 'sway', beat: null, chorus: null, line: null };
+  if (l && l.instrumental) return calm;
+  if (!l || !l.synced || !l.lines.length) return { groove: 'dance', beat: null, chorus: null, line: null };
+  let pos = m.positionMs || 0;
+  if (m.updatedAt > 0) pos += Math.max(0, now - m.updatedAt);
+  if (m.durationMs > 0) pos = Math.min(pos, m.durationMs);
+  const t = pos + LYRIC_LEAD_MS + (music.offsetMs || 0);
+  const i = lyricIndex(l.lines, t);
+  const line = i >= 0 ? l.lines[i] : null;
+  const next = l.lines[i + 1];
+  if (!line || !line.text || (t - line.t > MUSIC_BREAK_MS && (!next || next.t - t > 2000))) return calm;
+  const chorus = chorusStarts(l.lines)[i];
+  return { groove: 'dance', beat: i, chorus: chorus >= 0 ? chorus : null, line: line.text };
+}
+
+// A sung lyric line as at most two lines of text for the speech bubble.
+function sayLines(text) {
+  const words = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+  const lines = [''];
+  for (const w of words) {
+    const cur = lines[lines.length - 1];
+    if (!cur) lines[lines.length - 1] = w;
+    else if (cur.length + 1 + w.length <= SAY_LINE) lines[lines.length - 1] = `${cur} ${w}`;
+    else if (lines.length < 2) lines.push(w);
+    else {
+      lines[1] = `${lines[1]} ${w}`;
+      break;
+    }
+  }
+  return lines.filter(Boolean).map((s) => clip(s, SAY_LINE));
+}
+
 // One step of the thrown ball: it flies, bounces on the ground, rolls to a stop, and bounces off
 // the ground's ends. ball: { x, y, vx, vy, resting }; ground: { left, right, y }.
 function stepBall(ball, dt, ground) {
@@ -202,6 +298,11 @@ class PetBrain {
     this.landedAt = -Infinity;
     this.nudging = null; // wellbeing reminder: { bubble: 'water' | 'stretch', until, approach }
     this.limping = false;
+    this.groove = null; // dancing or swaying to music: 'dance' | 'sway' | null
+    this.lastBeat = null;
+    this.lastChorus = null;
+    this.lastPartyAt = -Infinity;
+    this.swayTurnAt = 0;
   }
 
   grab() {
@@ -266,6 +367,37 @@ class PetBrain {
     if (this.mode !== 'held') this.react = { kind: 'scared', until: now + REACT_MS.scared };
   }
 
+  // Music (input.music from musicMoment): awake pets on a floor dance, with a hop, a ♪ and a turn
+  // on each new lyric line and a backflip when the chorus comes back, or sway sleepily through
+  // intros, breaks and instrumentals. Pets busy with something else (fetching, playing, climbing,
+  // a nudge) finish that first; a session needing you, a muted session or night stops it.
+  stepMusic(now, input) {
+    const m = input.music || null;
+    const beat = m ? m.beat : null;
+    const chorus = m ? m.chorus : null;
+    const newBeat = beat !== null && beat !== this.lastBeat;
+    const newChorus = chorus !== null && chorus !== this.lastChorus;
+    this.lastBeat = beat;
+    this.lastChorus = chorus;
+    this.groove = m && PLAYFUL.has(input.mood || 'none') && !this.leaving ? m.groove : null;
+    if (!this.groove || this.mode !== 'ground' || this.nudging) return;
+    const a = this.act;
+    if (a && (a.then || !['sit', 'walk', 'sleep', 'dance', 'sway'].includes(a.kind))) return;
+    if (a && a.kind === this.groove) a.until = now + DANCE_HOLD_MS;
+    else this.act = { kind: this.groove, until: now + DANCE_HOLD_MS };
+    this.moodSince = now; // music keeps it awake
+    if (this.groove === 'dance' && newChorus && now - this.lastPartyAt >= CHORUS_PARTY_GAP_MS && (!this.react || this.react.kind === 'beat')) {
+      this.lastPartyAt = now;
+      this.react = { kind: 'party', until: now + REACT_MS.party };
+    } else if (this.groove === 'dance' && newBeat && !this.react && !input.reducedMotion) {
+      this.react = { kind: 'beat', until: now + BEAT_MS, bubble: 'note' };
+      this.facing = -this.facing;
+    } else if (this.groove === 'sway' && now >= this.swayTurnAt && !input.reducedMotion) {
+      this.facing = -this.facing;
+      this.swayTurnAt = now + SWAY_TURN_MS;
+    }
+  }
+
   // Its session ended: it walks off the screen, then `gone` is set. dir: -1 left, 1 right, 0 the
   // nearer edge.
   leave(dir = 0) {
@@ -296,6 +428,10 @@ class PetBrain {
 
   isAsleep() {
     return this.mode === 'ground' && !!this.act && this.act.kind === 'sleep';
+  }
+
+  isDancing() {
+    return this.mode === 'ground' && !!this.act && this.act.kind === 'dance';
   }
 
   // Play arranged by the pet manager: walk somewhere (then greet or nap), or chase another pet.
@@ -332,6 +468,7 @@ class PetBrain {
       this.y = ground.y;
       this.nextChaseAt = now + 30000;
     }
+    this.stepMusic(now, input);
     const floors = [{ id: GROUND, ...ground }, ...(input.floors || [])];
     const home = this.leaving ? 'ground' : homeFor(placement, mood, !!perch);
 
@@ -582,7 +719,7 @@ class PetBrain {
       !this.limping &&
       mood !== 'alert' &&
       mood !== 'asleep' &&
-      !['sleep', 'chase', 'land', 'greet', 'follow', 'fetch'].includes(this.act.kind) &&
+      !['sleep', 'chase', 'land', 'greet', 'follow', 'fetch', 'dance', 'sway'].includes(this.act.kind) &&
       !this.act.then;
     if (canChase && now >= this.nextChaseAt && nearCursor) {
       this.act = { kind: 'chase', until: now + CHASE_MS };
@@ -721,7 +858,7 @@ class PetBrain {
     return { kind: 'walk', targetX: clamp(this.x + dir * distance, floor.left, floor.right) };
   }
 
-  view({ mood = 'none', hover = false, strain = null, sign = null }) {
+  view({ mood = 'none', hover = false, strain = null, sign = null, say = null }) {
     const alert = mood === 'alert';
     let anim = 'sit';
     let bubble = null;
@@ -744,6 +881,7 @@ class PetBrain {
       else if (hover) bubble = 'heart';
       else if (this.react) bubble = reactBubble(this.react);
       else if (mood === 'error') bubble = 'question';
+      else if (this.groove) bubble = 'note';
       else if (mood === 'asleep' || (mood !== 'working' && this.lastNow - this.moodSince >= SLEEP_AFTER_MS)) bubble = 'zzz';
     } else if (this.leaving) {
       anim = 'walk';
@@ -770,6 +908,9 @@ class PetBrain {
       } else if (a.kind === 'sleep') {
         anim = 'sleep';
         bubble = 'zzz';
+      } else if (a.kind === 'dance' || a.kind === 'sway') {
+        anim = a.kind;
+        bubble = 'note';
       } else bubble = a.bubble || null;
       moving = !!a.moving;
     }
@@ -779,6 +920,9 @@ class PetBrain {
     // On the ground, a pet whose session needs you holds up a sign instead of the "!".
     const shownSign = alert && sign && this.mode === 'ground' && !this.leaving ? sign : null;
     if (shownSign) bubble = null;
+    // The singer (picked by the manager) shows the lyric line in a speech bubble while it dances.
+    const shownSay = !shownSign && say && this.isDancing() && !this.leaving && !hover && anim !== 'party' ? say : null;
+    if (shownSay) bubble = null;
     return {
       x: this.x,
       y: this.y,
@@ -790,6 +934,7 @@ class PetBrain {
       carry: this.isFetching() && this.act.carrying ? 'ball' : null,
       sweat: !!(strain && strain.sweat) && this.mode !== 'held',
       sign: shownSign,
+      say: shownSay,
     };
   }
 }
@@ -822,6 +967,9 @@ function windowFloors(windows, minWidth = 40) {
 
 module.exports = {
   PetBrain,
+  musicMoment,
+  sayLines,
+  chorusStarts,
   petMood,
   sessionMood,
   homeFor,

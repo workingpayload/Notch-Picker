@@ -27,6 +27,13 @@ function showAgent(agent) {
   document.getElementById('media-colors-toggle').hidden = !/Windows/.test(navigator.userAgent);
 }
 
+// Lyrics need Now playing; their options show only while lyrics are on.
+function showLyricsOptions(values) {
+  const windows = /Windows/.test(navigator.userAgent);
+  document.getElementById('lyrics-toggle').hidden = !windows || !values.mediaControls;
+  for (const label of document.querySelectorAll('.lyrics-option')) label.hidden = !windows || !values.mediaControls || !values.mediaLyrics;
+}
+
 function flashStatus(text) {
   statusEl.textContent = text;
   clearTimeout(statusTimer);
@@ -47,6 +54,7 @@ function fill(values) {
     else input.value = fieldValue(values[input.name]);
   }
   showAgent(values.agent);
+  showLyricsOptions(values);
 }
 
 const hotkeyHelp = document.getElementById('hotkey-help');

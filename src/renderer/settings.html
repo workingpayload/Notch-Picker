@@ -131,6 +131,31 @@
           </span>
           <input type="checkbox" name="mediaArtColors" />
         </label>
+        <label class="toggle" id="lyrics-toggle">
+          <span>
+            <b>Lyrics</b>
+            <small>Synced lyrics for Spotify in the panel, from LRCLIB (lrclib.net). Sends the song’s title, artist and album there; answers are cached on this PC until you turn this off.</small>
+          </span>
+          <input type="checkbox" name="mediaLyrics" />
+        </label>
+        <label class="toggle lyrics-option">
+          <span>
+            <b>Lyrics in the pill</b>
+            <small>Show the current line in the collapsed notch while a song plays.</small>
+          </span>
+          <input type="checkbox" name="lyricsInPill" />
+        </label>
+        <label class="toggle lyrics-option">
+          <span>
+            <b>Lyrics for all players</b>
+            <small>Also look up lyrics for browsers and other apps (their titles often don’t match a song).</small>
+          </span>
+          <input type="checkbox" name="lyricsAllPlayers" />
+        </label>
+        <label class="number lyrics-option">
+          <span><b>Lyrics timing</b><small>Positive shows lines earlier, negative later.</small></span>
+          <span class="unit"><input type="number" name="lyricsOffsetMs" min="-5000" max="5000" step="100" /> ms</span>
+        </label>
         <label class="toggle">
           <span>
             <b>File shelf</b>

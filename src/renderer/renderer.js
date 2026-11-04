@@ -68,7 +68,7 @@ let islandStyle = true;
 let bannersOn = true;
 let expandOn = 'hover';
 const features = { media: true, shelf: true, battery: true, timer: true, downloads: true };
-let extras = { media: null, timer: null, shelf: [], downloads: [] };
+let extras = { media: null, lyrics: null, timer: null, shelf: [], downloads: [] };
 // What the pill and bubble show (NotchIsland.planIsland); a session scrolled to on the pill.
 let plan = { primary: { kind: 'none', id: 'none' }, secondary: null, more: 0 };
 let pickedId = null;
@@ -195,6 +195,28 @@ function setDownloadRing(svg, d) {
   if (d.progress != null) setRing(svg, d.progress);
 }
 
+// The pill's text for playing media: the title (island style) or "Now playing" and title — artist
+// (classic), or with "Lyrics in the pill" the current lyric line, faded in when it changes.
+let pillLyricShown = null;
+
+function setMediaPillText(m, line, previous) {
+  pillLyricShown = line;
+  notch.classList.toggle('lyric-pill', !!line);
+  if (line) {
+    bar.label.textContent = islandStyle ? line : m.title || m.artist;
+    bar.detail.textContent = islandStyle ? m.artist : line;
+  } else {
+    bar.label.textContent = islandStyle ? m.title || m.artist : 'Now playing';
+    bar.detail.textContent = islandStyle ? m.artist : [m.title, m.artist].filter(Boolean).join(' — ');
+  }
+  if (line && line !== previous && !reducedMotion.matches) {
+    (islandStyle ? bar.label : bar.detail).animate([{ opacity: 0.15, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], {
+      duration: 260,
+      easing: 'ease-out',
+    });
+  }
+}
+
 function renderBar() {
   plan = window.NotchIsland.planIsland({
     sessions,
@@ -212,6 +234,9 @@ function renderBar() {
   notch.classList.toggle('bannered', bannerShown());
   notch.classList.toggle('text-banner', !!textBanner);
   notch.classList.remove('has-art');
+  const shownLyric = pillLyricShown;
+  pillLyricShown = null;
+  notch.classList.remove('lyric-pill');
   bar.wave.hidden = true;
   bar.wave.classList.remove('paused');
   bar.ring.toggleAttribute('hidden', true);
@@ -233,8 +258,7 @@ function renderBar() {
       setArt(bar.art, m.art);
       notch.classList.add('has-art');
     }
-    bar.label.textContent = islandStyle ? m.title || m.artist : 'Now playing';
-    bar.detail.textContent = islandStyle ? m.artist : [m.title, m.artist].filter(Boolean).join(' — ');
+    setMediaPillText(m, pillLyric(Date.now()), shownLyric);
     bar.label.title = [m.title, m.artist, m.app].filter(Boolean).join(' · ');
     setElapsed(null);
     bar.wave.hidden = false;
@@ -1361,6 +1385,11 @@ function liveTick() {
     const bubbleRing = bubbleBody.querySelector('.timer-ring');
     if (bubbleRing) setRing(bubbleRing, window.NotchIsland.timerProgress(t, now));
   }
+  // The pill's lyric line (Lyrics in the pill) follows the song.
+  if (plan.primary.kind === 'media' && !(banner && !cardBanners())) {
+    const line = pillLyric(now);
+    if (line !== pillLyricShown) setMediaPillText(plan.primary.media, line, pillLyricShown);
+  }
   if (expanded) liveTickExtras(now);
 }
 
@@ -1810,6 +1839,8 @@ function applySize(values) {
   features.timer = !values || values.quickTimer !== false;
   features.downloads = !values || values.downloads !== false;
   artColorsOn = !values || values.mediaArtColors !== false;
+  lyricsInPill = !!(values && values.lyricsInPill);
+  lyricsOffsetMs = (values && Number(values.lyricsOffsetMs)) || 0;
   applyArtColors();
   document.body.classList.toggle('island-style', islandStyle);
   if (wasIsland !== islandStyle) lastShapeKey = '';

@@ -31,6 +31,14 @@ const SCHEMA = {
   mediaControls: { type: 'boolean', default: true },
   // Now playing takes its colours from the album cover instead of the default pink.
   mediaArtColors: { type: 'boolean', default: true },
+  // Synced lyrics for now playing from LRCLIB (sends the song's title, artist and album there).
+  mediaLyrics: { type: 'boolean', default: false },
+  // The current lyric line in the collapsed pill (else lyrics only show in the panel).
+  lyricsInPill: { type: 'boolean', default: false },
+  // Look up lyrics for every player, not just Spotify.
+  lyricsAllPlayers: { type: 'boolean', default: false },
+  // Positive: lines show earlier.
+  lyricsOffsetMs: { type: 'number', default: 0, min: -5000, max: 5000, integer: true },
   // Drop files on the notch to keep them; drag them out again later.
   shelf: { type: 'boolean', default: true },
   // Banner when charging starts and when the battery runs low.
@@ -72,6 +80,8 @@ const SCHEMA = {
   petSigns: { type: 'boolean', default: true },
   // Level badges earned from finished turns and todo lists.
   petLevels: { type: 'boolean', default: true },
+  // While a song plays (Now playing): pets dance and one sings the lyric line (with Lyrics on).
+  petMusic: { type: 'boolean', default: false },
   // Wellbeing (with pets on): stretch after a long stretch at the computer, sip water now and then.
   petBreaks: { type: 'boolean', default: true },
   petBreakMinutes: { type: 'number', default: 50, min: 15, max: 180, integer: true },

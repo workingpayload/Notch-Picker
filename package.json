@@ -20,7 +20,7 @@
     "linux"
   ],
   "author": "Notch Picker",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "type": "commonjs",
   "devDependencies": {
     "electron": "^45.1.0",

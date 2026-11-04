@@ -280,4 +280,10 @@ Copilot CLI writes each session to `%USERPROFILE%\.copilot\session-state\<sessio
 ```powershell
 npm test
 ```
+
+## License
+
+Copyright (C) 2026 Raj
+
+Notch Picker is free software, licensed under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html) (GPL-3.0). You can redistribute and modify it under the terms of that license. It is distributed in the hope that it will be useful, but **without any warranty**, without even the implied warranty of merchantability or fitness for a particular purpose. See the [`LICENSE`](LICENSE) file for the full text.
 "# Notch-Picker" 

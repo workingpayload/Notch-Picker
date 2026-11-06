@@ -35,6 +35,8 @@ const SCHEMA = {
   mediaLyrics: { type: 'boolean', default: false },
   // The current lyric line in the collapsed pill (else lyrics only show in the panel).
   lyricsInPill: { type: 'boolean', default: false },
+  // What the pill shows while lyrics play and a session is also running (sessions that need you always win).
+  lyricsPriority: { type: 'enum', values: ['session', 'lyrics'], default: 'session' },
   // Look up lyrics for every player, not just Spotify.
   lyricsAllPlayers: { type: 'boolean', default: false },
   // Positive: lines show earlier.

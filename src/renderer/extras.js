@@ -106,6 +106,7 @@ function renderMediaCard(m, lyricsBox = null) {
 // Lines feel late when they appear exactly on time.
 const LYRICS_LEAD_MS = 200;
 let lyricsInPill = false;
+let lyricsFirst = false;
 let lyricsOffsetMs = 0;
 const lyricsView = { key: null, node: null, track: null, index: null, scroll: 0 };
 
@@ -178,6 +179,13 @@ function pillLyric(now) {
   if (!l || !l.synced || extras.media.status !== 'playing') return null;
   const i = window.NotchIsland.lyricIndexAt(l.lines, lyricsPosition(now));
   return i >= 0 ? l.lines[i].text || '♪' : null;
+}
+
+// Lyrics take the pill ahead of sessions ("While a session runs, show: Lyrics") only while synced
+// lyrics for the playing song can show there; otherwise the session status stays.
+function lyricsLeadPill() {
+  const l = lyricsFirst && lyricsInPill && currentLyrics();
+  return !!l && l.synced && !l.instrumental && extras.media.status === 'playing';
 }
 
 // The running timer as a chip in the panel header (the ⏱ button next to it opens the menu).

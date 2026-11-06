@@ -32,6 +32,8 @@ function showLyricsOptions(values) {
   const windows = /Windows/.test(navigator.userAgent);
   document.getElementById('lyrics-toggle').hidden = !windows || !values.mediaControls;
   for (const label of document.querySelectorAll('.lyrics-option')) label.hidden = !windows || !values.mediaControls || !values.mediaLyrics;
+  // The priority only matters when lyrics show in the pill.
+  if (!values.lyricsInPill) document.getElementById('lyrics-priority').hidden = true;
 }
 
 function flashStatus(text) {

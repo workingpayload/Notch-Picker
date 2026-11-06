@@ -224,6 +224,7 @@ function renderBar() {
     timer: features.timer ? extras.timer : null,
     downloads: features.downloads ? extras.downloads : null,
     pickedId,
+    mediaFirst: features.media && lyricsLeadPill(),
   });
   const primary = plan.primary;
   const top = primary.kind === 'session' ? primary.session : null;
@@ -1840,6 +1841,7 @@ function applySize(values) {
   features.downloads = !values || values.downloads !== false;
   artColorsOn = !values || values.mediaArtColors !== false;
   lyricsInPill = !!(values && values.lyricsInPill);
+  lyricsFirst = !!values && values.lyricsPriority === 'lyrics';
   lyricsOffsetMs = (values && Number(values.lyricsOffsetMs)) || 0;
   applyArtColors();
   document.body.classList.toggle('island-style', islandStyle);

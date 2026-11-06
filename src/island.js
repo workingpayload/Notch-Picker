@@ -58,13 +58,15 @@ function downloadSummary(list) {
 
 // Activities in priority order: sessions (already sorted by urgency, muted last), then a running
 // timer, then downloads in progress, then playing media. `pickedId` is a session the user scrolled
-// to on the pill; it is shown first unless another session needs attention.
+// to on the pill; it is shown first unless another session needs attention. With `mediaFirst`
+// (lyrics preferred over session status) playing media leads instead, but a session that needs
+// you or one the user scrolled to still comes first.
 //
 // Returns { primary, secondary, more }:
 //   primary   - what the pill shows: { kind: 'session' | 'media' | 'timer' | 'download' | 'none', ... }
 //   secondary - what the split bubble shows (null when there is only one activity)
 //   more      - how many further activities are hidden
-function planIsland({ sessions = [], media = null, timer = null, downloads = null, pickedId = null } = {}) {
+function planIsland({ sessions = [], media = null, timer = null, downloads = null, pickedId = null, mediaFirst = false } = {}) {
   const active = sessions.filter(isActiveSession);
   const picked = pickedId ? sessions.find((s) => s.id === pickedId && !s.muted) : null;
   const alerting = active.find(isAlerting);
@@ -75,7 +77,15 @@ function planIsland({ sessions = [], media = null, timer = null, downloads = nul
   if (timerRunning(timer)) list.push({ kind: 'timer', id: 'timer', timer });
   const download = downloadSummary(downloads);
   if (download) list.push({ kind: 'download', id: 'download', download });
-  if (mediaPlaying(media)) list.push({ kind: 'media', id: 'media', media });
+  if (mediaPlaying(media)) {
+    const item = { kind: 'media', id: 'media', media };
+    if (!mediaFirst) list.push(item);
+    else {
+      const lead = list[0];
+      const keepLead = lead && lead.kind === 'session' && (isAlerting(lead.session) || (picked && lead.id === picked.id));
+      list.splice(keepLead ? 1 : 0, 0, item);
+    }
+  }
 
   let primary = list[0];
   if (!primary) {
@@ -90,9 +100,11 @@ function planIsland({ sessions = [], media = null, timer = null, downloads = nul
 // The next session to show when cycling the pill with the scroll wheel (direction +1 / -1).
 function cycleSession(sessions, currentId, direction) {
   const live = sessions.filter((s) => !s.muted);
-  if (live.length < 2) return null;
   const i = live.findIndex((s) => s.id === currentId);
-  const next = (Math.max(0, i) + (direction < 0 ? -1 : 1) + live.length) % live.length;
+  // The pill shows something else (lyrics, a timer…): start from the first or last session.
+  if (i < 0) return live.length ? live[direction < 0 ? live.length - 1 : 0].id : null;
+  if (live.length < 2) return null;
+  const next = (i + (direction < 0 ? -1 : 1) + live.length) % live.length;
   return live[next].id;
 }
 

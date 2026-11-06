@@ -55,6 +55,25 @@ test('a session scrolled to on the pill is shown first, unless another one needs
   assert.equal(island.cycleSession(sessions, 'a', -1), 'c', 'wraps around');
   assert.equal(island.cycleSession([s('a', 'tool')], 'a', 1), null);
   assert.equal(island.cycleSession([s('a', 'tool'), s('m', 'tool', { muted: true })], 'a', 1), null);
+  assert.equal(island.cycleSession(sessions, null, 1), 'a', 'from lyrics or a timer, scrolling starts at the first session');
+  assert.equal(island.cycleSession(sessions, null, -1), 'c');
+  assert.equal(island.cycleSession([s('a', 'tool')], null, 1), 'a');
+});
+
+test('preferring lyrics puts playing media ahead of working sessions, but not ahead of one that needs you', () => {
+  const working = [s('a', 'thinking'), s('b', 'tool')];
+  assert.equal(island.planIsland({ sessions: working, media: playing }).primary.kind, 'session', 'sessions lead by default');
+  const plan = island.planIsland({ sessions: working, media: playing, mediaFirst: true });
+  assert.equal(plan.primary.kind, 'media');
+  assert.equal(plan.secondary.id, 'a');
+  assert.equal(plan.more, 1);
+
+  const urgent = island.planIsland({ sessions: [s('a', 'approval'), s('b', 'tool')], media: playing, mediaFirst: true });
+  assert.equal(urgent.primary.id, 'a');
+  assert.equal(urgent.secondary.kind, 'media');
+  assert.equal(island.planIsland({ sessions: working, media: playing, mediaFirst: true, pickedId: 'b' }).primary.id, 'b', 'a scrolled-to session wins');
+  const paused = island.planIsland({ sessions: working, media: { ...playing, status: 'paused' }, mediaFirst: true });
+  assert.equal(paused.primary.id, 'a');
 });
 
 test('transitions become banners; a finished session does not cover one that needs you', () => {

@@ -15,6 +15,7 @@ function parseLine(line) {
   try {
     const v = JSON.parse(line);
     if (Array.isArray(v.windows)) return { windows: parseWindows(v.windows) };
+    if (Array.isArray(v.icons)) return { icons: parseIcons(v.icons) };
     if ('wslClients' in v) return { wslClients: parseWslClients(v.wslClients) };
     const fgRect = parseRect(v.fgRect);
     const fgApp = typeof v.fgApp === 'string' && /^[^\u0000-\u001f]{1,100}$/.test(v.fgApp) ? v.fgApp : '';
@@ -43,6 +44,14 @@ function parseWindows(list) {
     .map(([id, l, t, r, b, cover]) => ({ id, x: l, y: t, width: r - l, height: b - t, cover: cover === 1 }));
 }
 
+// [[left, top, right, bottom], ...] (physical pixels; top = the icon picture's top edge) ->
+// [{ x, y, width, height }].
+function parseIcons(list) {
+  return list
+    .filter((r) => Array.isArray(r) && r.length >= 4 && r.every(Number.isFinite) && r[2] > r[0] && r[3] > r[1])
+    .map(([l, t, r, b]) => ({ x: l, y: t, width: r - l, height: b - t }));
+}
+
 // {"Ubuntu": 2, ...}: open WSL terminals per distro.
 function parseWslClients(map) {
   if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
@@ -55,7 +64,8 @@ function isQuiet(state) {
 }
 
 // Runs fullscreen-monitor.ps1 and emits 'change' with { quns, fullscreen, foreground, foregroundApp,
-// foregroundRect } (rects in physical pixels), while window tracking is on, 'windows' with the visible app windows, and while
+// foregroundRect } (rects in physical pixels), while window tracking is on, 'windows' with the visible app windows and
+// 'icons' with the desktop icons, and while
 // WSL tracking is on, 'wsl' with the open WSL terminals per distro (null when unknown).
 class FullscreenMonitor extends EventEmitter {
   constructor({ log = () => {} } = {}) {
@@ -86,6 +96,10 @@ class FullscreenMonitor extends EventEmitter {
       if (!next) return;
       if (next.windows) {
         this.emit('windows', next.windows);
+        return;
+      }
+      if (next.icons) {
+        this.emit('icons', next.icons);
         return;
       }
       if ('wslClients' in next) {
@@ -121,12 +135,15 @@ class FullscreenMonitor extends EventEmitter {
     return true;
   }
 
-  // Turns reporting of the visible app windows on or off (desktop pets walk on them).
+  // Turns reporting of the visible app windows and desktop icons on or off (desktop pets walk on them).
   setWindowTracking(on) {
     if (on === this.trackWindows) return;
     this.trackWindows = on;
     if (this.child) this.child.stdin.write(on ? 'windows on\n' : 'windows off\n');
-    if (!on) this.emit('windows', []);
+    if (!on) {
+      this.emit('windows', []);
+      this.emit('icons', []);
+    }
   }
 
   // Turns reporting of open WSL terminals on or off ('wsl' events; null when off).
@@ -145,4 +162,4 @@ class FullscreenMonitor extends EventEmitter {
   }
 }
 
-module.exports = { FullscreenMonitor, parseLine, parseWindows, isQuiet, QUNS };
+module.exports = { FullscreenMonitor, parseLine, parseWindows, parseIcons, isQuiet, QUNS };

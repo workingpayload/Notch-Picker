@@ -32,6 +32,11 @@ test('WSL terminal counts from the monitor are parsed', () => {
   assert.deepEqual(parseLine('{"wslClients":3}'), { wslClients: {} });
 });
 
+test('desktop icon tops from the monitor are parsed', () => {
+  assert.deepEqual(parseLine('{"icons":[[19,18,107,115],[1,2,1,9],["a",0,5,5],[3]]}'), { icons: [{ x: 19, y: 18, width: 88, height: 97 }] });
+  assert.deepEqual(parseLine('{"icons":[]}'), { icons: [] });
+});
+
 test('presentation mode and quiet time count as quiet', () => {
   assert.equal(isQuiet({ quns: QUNS.PRESENTATION }), true);
   assert.equal(isQuiet({ quns: QUNS.QUIET_TIME }), true);

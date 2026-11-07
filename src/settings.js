@@ -67,7 +67,7 @@ const SCHEMA = {
   // Per-session species chosen by the user (others are assigned automatically).
   petSpecies: { type: 'speciesMap', default: {}, max: 200 },
   petPlacement: { type: 'enum', values: ['taskbar', 'notch', 'both'], default: 'both' },
-  // Roam the whole screen: climb its edges, walk on app windows. Play: pets interact.
+  // Roam the whole screen: climb its edges, walk on app windows and desktop icons. Play: pets interact.
   petRoam: { type: 'boolean', default: true },
   petPlay: { type: 'boolean', default: true },
   // 'match' follows the notch's size preset.

@@ -1735,10 +1735,12 @@ app.whenReady().then(async () => {
     returnRequestsToTerminal(state.foreground).catch((e) => log(`Hand-back check failed: ${e.message}`));
   });
   // App windows (physical pixels) for roaming pets to walk on.
+  const toDip = (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r);
   fullscreen.on('windows', (wins) => {
-    const toDip = (r) => (process.platform === 'win32' ? screen.screenToDipRect(null, r) : r);
     pet.setWindows(wins.map((w) => ({ id: w.id, cover: w.cover, ...toDip({ x: w.x, y: w.y, width: w.width, height: w.height }) })));
   });
+  // Desktop icons (physical pixels), which roaming pets stand on too.
+  fullscreen.on('icons', (icons) => pet.setIcons(icons.map(toDip)));
   fullscreen.setWindowTracking(settings.get().pet && settings.get().petRoam);
   // Open WSL terminals per distro: while a distro has one, it's read on every scan (see wsl.js).
   fullscreen.on('wsl', (clients) => wsl.setClients(clients));

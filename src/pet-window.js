@@ -534,7 +534,9 @@ class PetManager {
     this.hiddenDisplays = new Set();
     this.reducedMotion = false;
     this.grown = { width: 0, height: 0 }; // smallest pet window Windows has allowed, in DIPs
-    this.windowFloors = []; // tops of app windows pets can walk on
+    this.windowFloors = []; // tops of app windows and desktop icons pets can walk on
+    this.appWindows = []; // visible app windows (DIPs, topmost first)
+    this.desktopIcons = []; // desktop icons' tops (DIPs)
     this.nextPlayAt = Date.now() + PLAY_EVERY_MS / 2;
     this.playTimer = null;
     this.music = null; // now playing and its lyrics while "Sing and dance to music" is on
@@ -844,11 +846,25 @@ class PetManager {
     return { left: wa.x + WALL_INSET * cell, right: wa.x + wa.width - WALL_INSET * cell, top: wa.y + WIN_ROWS * cell };
   }
 
-  // The visible app windows (DIPs, topmost first), whose tops pets can walk on. A window top
-  // with no room above it for a pet (e.g. at the top of the screen) isn't one.
+  // The visible app windows (DIPs, topmost first), whose tops pets can walk on.
   setWindows(windows) {
+    this.appWindows = windows;
+    this.updateFloors();
+  }
+
+  // The desktop icons (DIPs; y = the top of the icon's picture), which pets can stand on where no
+  // window covers them.
+  setIcons(icons) {
+    this.desktopIcons = icons;
+    this.updateFloors();
+  }
+
+  // Window tops and desktop icons (behind every window) as floors. One with no room above it for
+  // a pet (e.g. at the top of the screen) isn't one.
+  updateFloors() {
     const headroom = this.boxSize().height;
-    this.windowFloors = windowFloors(windows).filter((f) => {
+    const icons = this.desktopIcons.map((r, i) => ({ ...r, id: `icon${i}` }));
+    this.windowFloors = windowFloors([...this.appWindows, ...icons]).filter((f) => {
       const d = screen.getDisplayNearestPoint({ x: Math.round((f.left + f.right) / 2), y: Math.round(f.y) });
       return f.y - headroom >= d.workArea.y && f.y < d.workArea.y + d.workArea.height - 8;
     });

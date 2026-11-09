@@ -60,6 +60,31 @@ function pidIsCopilot(pid) {
   return pidHasName(pid, COPILOT_PROCESS_NAMES);
 }
 
+// A CLI process runs one session at a time, but after `/resume` (or `/new`) inside a running CLI
+// the folder it left keeps its lock until the CLI exits. Of the folders locked by one PID, the
+// current session is the one written to last.
+async function currentSessionPerPid(held) {
+  const byPid = new Map();
+  for (const h of held) {
+    if (!byPid.has(h.pid)) byPid.set(h.pid, []);
+    byPid.get(h.pid).push(h);
+  }
+  const mtime = (file) => fsp.stat(file).then((s) => s.mtimeMs, () => 0);
+  const out = [];
+  for (const group of byPid.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    group.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const stamps = await Promise.all(group.map(async (h) => Math.max(await mtime(h.lock), await mtime(path.join(h.dir, 'events.jsonl')))));
+    let best = 0;
+    for (let i = 1; i < group.length; i++) if (stamps[i] > stamps[best]) best = i;
+    out.push(group[best]);
+  }
+  return out;
+}
+
 function parseWorkspaceYaml(text) {
   const out = {};
   for (const line of text.split(/\r?\n/)) {
@@ -433,6 +458,7 @@ class SessionWatcher extends EventEmitter {
       if (wsl) for (const id of this.trackers.keys()) keep(id);
       return;
     }
+    const held = [];
     await Promise.all(
       entries
         .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
@@ -453,20 +479,21 @@ class SessionWatcher extends EventEmitter {
             if (wsl) {
               const live = await this.wsl.pidIsCopilot(wsl, pid);
               if (live) {
-                ids.set(e.name, { dir, pid, wsl });
+                held.push({ id: e.name, dir, pid, wsl, lock: path.join(dir, f) });
                 return;
               }
               if (live === null) keep(e.name);
               continue;
             }
             if (pidAlive(pid) && (await pidIsCopilot(pid))) {
-              ids.set(e.name, { dir, pid, wsl: null });
+              held.push({ id: e.name, dir, pid, wsl: null, lock: path.join(dir, f) });
               return;
             }
             if (!pidAlive(pid)) pidNameCache.delete(pid);
           }
         })
     );
+    for (const h of await currentSessionPerPid(held)) ids.set(h.id, { dir: h.dir, pid: h.pid, wsl: h.wsl });
   }
 
   // The session-state folder of a live or recently ended session.

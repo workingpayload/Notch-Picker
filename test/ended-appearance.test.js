@@ -5,15 +5,23 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawn } = require('child_process');
 const { SessionWatcher } = require('../src/watcher');
 const { sanitize, DEFAULTS } = require('../src/settings');
 
 const line = (type, data = {}) => JSON.stringify({ type, data, timestamp: new Date().toISOString() }) + '\n';
 
-function makeSession(root, id, name) {
+// A live process standing in for one CLI (a CLI runs one session at a time).
+function cliPid(t) {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+  t.after(() => child.kill());
+  return child.pid;
+}
+
+function makeSession(root, id, name, pid = process.pid) {
   const dir = path.join(root, id);
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, `inuse.${process.pid}.lock`), String(process.pid));
+  fs.writeFileSync(path.join(dir, `inuse.${pid}.lock`), String(pid));
   fs.writeFileSync(path.join(dir, 'workspace.yaml'), `name: ${name}\ncwd: C:\\work\\${id}\n`);
   fs.writeFileSync(
     path.join(dir, 'events.jsonl'),
@@ -28,9 +36,10 @@ function makeSession(root, id, name) {
 test('sessions that end are listed as recently ended until resumed, dismissed or expired', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notch-ended-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const a = makeSession(root, 'aaa', 'Alpha');
-  const b = makeSession(root, 'bbb', 'Beta');
-  const c = makeSession(root, 'ccc', 'Gamma');
+  const a = makeSession(root, 'aaa', 'Alpha', cliPid(t));
+  const bPid = cliPid(t);
+  const b = makeSession(root, 'bbb', 'Beta', bPid);
+  const c = makeSession(root, 'ccc', 'Gamma', cliPid(t));
 
   const w = new SessionWatcher({ root, watch: false, endedTtlMs: 60000 });
   let ended = [];
@@ -43,7 +52,7 @@ test('sessions that end are listed as recently ended until resumed, dismissed or
   // Clean exit: shutdown event.
   fs.appendFileSync(path.join(a, 'events.jsonl'), line('session.shutdown'));
   // Crash: lock file disappears without a shutdown event.
-  fs.rmSync(path.join(b, `inuse.${process.pid}.lock`));
+  fs.rmSync(path.join(b, `inuse.${bPid}.lock`));
   await w.scan();
   await w.tick();
   assert.deepEqual(JSON.parse(w.lastPayload).map((s) => s.name), ['Gamma']);
@@ -68,6 +77,35 @@ test('sessions that end are listed as recently ended until resumed, dismissed or
   assert.deepEqual(ended.map((e) => e.name), ['Gamma']);
   w.emitEnded(Date.now() + 61000);
   assert.deepEqual(ended, []);
+});
+
+test('a CLI that resumes another session shows only that session, though the one it left stays locked', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'notch-ended-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const pid = cliPid(t);
+  const age = (dir, seconds) => {
+    const when = new Date(Date.now() - seconds * 1000);
+    for (const f of [`inuse.${pid}.lock`, 'events.jsonl']) fs.utimesSync(path.join(dir, f), when, when);
+  };
+  const fresh = makeSession(root, 'fresh', 'Fresh', pid);
+  age(fresh, 60);
+  const w = new SessionWatcher({ root, watch: false });
+  await w.scan();
+  await w.tick();
+  assert.deepEqual(JSON.parse(w.lastPayload).map((s) => s.name), ['Fresh']);
+
+  // `/resume` inside the same CLI: the old folder keeps its lock, the resumed one gets one too.
+  const resumed = makeSession(root, 'resumed', 'Resumed', pid);
+  await w.scan();
+  await w.tick();
+  assert.deepEqual(JSON.parse(w.lastPayload).map((s) => s.name), ['Resumed']);
+
+  // Resuming the first session again switches back.
+  age(resumed, 30);
+  fs.appendFileSync(path.join(fresh, 'events.jsonl'), line('session.resume'));
+  await w.scan();
+  await w.tick();
+  assert.deepEqual(JSON.parse(w.lastPayload).map((s) => s.name), ['Fresh']);
 });
 
 test('sessions already ended at startup are not listed', async (t) => {

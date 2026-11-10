@@ -71,7 +71,7 @@ The pill hangs from the top-center of the primary display and stays on top. Clic
 - **Over browser and app tabs:** while a browser (Chrome, Edge, Firefox, Brave, Opera, Vivaldi, Arc, Zen, …), Windows Terminal, a code editor (VS Code, Cursor, Windsurf, JetBrains IDEs, Notepad++, Sublime, Zed) or File Explorer/Notepad is in front with its tab strip right under the pill (maximized or snapped to the top), the notch steps aside on that monitor so you can reach the tabs. A window further down the screen doesn't hide it. It comes back as soon as you switch away, and while a session needs you (approval or question). Rest the pointer at the top edge over its spot to bring it back for a moment (see below), or pin it (Ctrl+Alt+N) to show it anyway. Turn off with *Hide over browser and app tabs* in Settings or the tray.
 - **Hide and return animation:** whenever the notch hides (full-screen apps, tabs, auto-hide when idle, *Hide* in the tray), the pill slides up into the top edge of the screen and fades out, and when it comes back it drops down with a little spring. If it's needed again mid-hide, it simply reverses. *Reduce motion* in Windows turns the animation off.
 - **Right-click** the notch or click the tray icon for *Hide from screen sharing*, *Notifications*, *Sound*, *Settings…*, *Launch at login*, *Open log* and *Quit*.
-- **Tray icon:** the coloured dot shows the most urgent unmuted session (same colours as the notch). A red badge appears when a session is waiting for approval or input, so you can see status even when the notch is hidden. The pill turns dark on a light taskbar.
+- **Tray icon:** the app icon, with a coloured dot in its corner showing the most urgent unmuted session (same colours as the notch). A red badge appears when a session is waiting for approval or input, so you can see status even when the notch is hidden.
 - **Pin expanded:** press **Ctrl+Alt+N** from anywhere, click the 📌 in the panel header, or use *Pin expanded* in the tray. The panel stays open without hovering and appears even if the notch is auto-hidden or hidden for a full-screen app. Press again to unpin. You can change the shortcut in Settings, or leave it empty to disable it. If another app already uses that combination, Settings says so.
 - **Compact when idle** (off by default): when nothing is happening, the pill shrinks to a single status dot. It grows back as soon as a session is working or needs you. Hover the dot to expand it.
 - **Auto-hide when idle** (off by default): the notch disappears 8 seconds after every unmuted session goes idle, giving the "Done" flash time to show. It comes back on any activity. It never vanishes while you're hovering it. The tray icon and hotkey still work while it's hidden.
@@ -209,7 +209,7 @@ Open *Settings…* from the tray, or run `npm start -- --settings`. Settings are
 
 ## Install
 
-The app icon (`build/icon.png`, `build/icon.ico`) is drawn by `python build/make-icon.py build` (needs Pillow): a navy tile with the notch pill (status light, waveform) and a clay-shaded tabby peeking over it; 16–32 px sizes zoom in and drop the fine details. Set `ICON_PREVIEW=1` to also write preview sheets.
+The app icon (`build/icon.png`, `build/icon.ico`, and the `src/assets/icon-*.png` the tray and windows use) is drawn by `python build/make-icon.py build` (needs Pillow): a navy tile with the notch pill (status light, waveform) and a clay-shaded tabby peeking over it; 16–32 px sizes zoom in and drop the fine details. Set `ICON_PREVIEW=1` to also write preview sheets.
 
 ```powershell
 npm install

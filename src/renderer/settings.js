@@ -38,8 +38,9 @@ function showLyricsOptions(values) {
 
 function flashStatus(text) {
   statusEl.textContent = text;
+  statusEl.classList.add('show');
   clearTimeout(statusTimer);
-  statusTimer = setTimeout(() => (statusEl.textContent = ''), 1500);
+  statusTimer = setTimeout(() => statusEl.classList.remove('show'), 1500);
 }
 
 // Lists (download folders) are edited as one text, separated by ';'.
@@ -57,7 +58,112 @@ function fill(values) {
   }
   showAgent(values.agent);
   showLyricsOptions(values);
+  syncNav();
+  applySearch();
 }
+
+// Sidebar: one page at a time, or every matching setting while searching.
+const nav = document.getElementById('nav');
+const content = document.getElementById('content');
+const pages = [...document.querySelectorAll('.page')];
+const searchInput = document.getElementById('search');
+const noResults = document.getElementById('no-results');
+const PAGE_KEY = 'settingsPage';
+
+function showPage(id) {
+  const target = pages.find((p) => p.dataset.page === id && !p.hidden) || pages[0];
+  for (const page of pages) page.classList.toggle('active', page === target);
+  for (const button of nav.querySelectorAll('button')) {
+    if (button.dataset.page === target.dataset.page) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
+  content.scrollTop = 0;
+  try {
+    localStorage.setItem(PAGE_KEY, target.dataset.page);
+  } catch {}
+}
+
+// Pages hidden for the current agent or platform lose their sidebar entry too.
+function syncNav() {
+  for (const button of nav.querySelectorAll('button')) {
+    const page = pages.find((p) => p.dataset.page === button.dataset.page);
+    button.hidden = !page || page.hidden;
+  }
+  const active = pages.find((p) => p.classList.contains('active'));
+  if (!active || active.hidden) showPage('general');
+}
+
+const normalize = (text) => text.replace(/\s+/g, ' ').toLowerCase();
+
+function applySearch() {
+  const query = normalize(searchInput.value).trim();
+  document.body.classList.toggle('searching', !!query);
+  let anyHit = false;
+  for (const page of pages) {
+    const pageHit = !!query && normalize(page.querySelector('h1').textContent).includes(query);
+    let pageShown = false;
+    for (const section of page.querySelectorAll('section')) {
+      const sectionHit = pageHit || (!!query && normalize(section.querySelector('h2').textContent).includes(query));
+      let sectionShown = false;
+      for (const row of section.querySelectorAll(':scope > :not(h2)')) {
+        const hit = !query || sectionHit || normalize(row.textContent).includes(query);
+        row.classList.toggle('no-match', !hit);
+        if (hit && !row.hidden) sectionShown = true;
+      }
+      section.classList.toggle('no-match', !sectionShown);
+      if (sectionShown) pageShown = true;
+    }
+    page.classList.toggle('no-match', !!query && !pageShown);
+    if (pageShown && !page.hidden) anyHit = true;
+  }
+  noResults.hidden = !query || anyHit;
+}
+
+nav.addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-page]');
+  if (!button) return;
+  if (searchInput.value) {
+    searchInput.value = '';
+    applySearch();
+  }
+  showPage(button.dataset.page);
+});
+
+nav.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const buttons = [...nav.querySelectorAll('button:not([hidden])')];
+  const i = buttons.indexOf(document.activeElement);
+  if (i < 0) return;
+  e.preventDefault();
+  const next = buttons[(i + (e.key === 'ArrowDown' ? 1 : buttons.length - 1)) % buttons.length];
+  next.focus();
+  next.click();
+});
+
+searchInput.addEventListener('input', () => {
+  content.scrollTop = 0;
+  applySearch();
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  searchInput.value = '';
+  applySearch();
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    searchInput.focus();
+    searchInput.select();
+  }
+});
+
+let savedPage = null;
+try {
+  savedPage = localStorage.getItem(PAGE_KEY);
+} catch {}
+showPage(savedPage || 'general');
 
 const hotkeyHelp = document.getElementById('hotkey-help');
 const hotkeyHelpDefault = hotkeyHelp.innerHTML;

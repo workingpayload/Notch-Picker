@@ -198,6 +198,11 @@ big.save(os.path.join(OUT, 'icon.png'))
 sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
 frames = {s: render(s) for s in sizes}
 frames[256].save(os.path.join(OUT, 'icon.ico'), sizes=[(s, s) for s in sizes], append_images=[frames[s] for s in sizes if s != 256])
+# PNGs the app loads at runtime (tray, window and settings icons); build/ isn't packaged.
+ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'assets')
+os.makedirs(ASSETS, exist_ok=True)
+for s in (16, 32, 128, 256):
+    frames[s].save(os.path.join(ASSETS, f'icon-{s}.png'))
 if os.environ.get('ICON_PREVIEW'):
     # Large icon, then every size on dark and light backgrounds, and the smallest ones zoomed.
     sheet = Image.new('RGBA', (1024 + 40 + sum(s + 24 for s in sizes) + 20, 1024), (32, 32, 36, 255))

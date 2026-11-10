@@ -118,3 +118,26 @@ test('tray icon shows the status colour and an alert badge', () => {
   const light = renderTrayIcon({ status: 'idle', size: 32, taskbar: 'light' });
   assert.ok(px(light, 20, 16)[0] < 60, 'dark pill on light taskbars');
 });
+
+test('tray icon draws the status dot and badge over the app icon', () => {
+  const px = (img, x, y) => {
+    const i = (y * img.width + x) * 4;
+    return [img.buffer[i + 2], img.buffer[i + 1], img.buffer[i], img.buffer[i + 3]];
+  };
+  // A solid navy 32px "icon" in premultiplied BGRA.
+  const base = { buffer: Buffer.alloc(32 * 32 * 4), width: 32, height: 32 };
+  for (let i = 0; i < base.buffer.length; i += 4) base.buffer.set([60, 30, 20, 255], i);
+
+  const plain = renderTrayIcon({ size: 32, base });
+  assert.deepEqual(px(plain, 16, 16), [20, 30, 60, 255], 'the icon shows through untouched');
+  assert.deepEqual(px(plain, 24, 24), [20, 30, 60, 255], 'no dot without a session');
+
+  const alert = renderTrayIcon({ status: 'tool', badge: true, size: 32, base });
+  assert.deepEqual(px(alert, 24, 24), [...STATUS_COLORS.tool, 255]);
+  assert.deepEqual(px(alert, 25, 7), [255, 59, 48, 255]);
+  assert.equal(px(alert, 24, 17)[3], 0, 'a gap is cut around the dot');
+  assert.deepEqual(px(alert, 8, 16), [20, 30, 60, 255]);
+
+  const fallback = renderTrayIcon({ status: 'tool', size: 32, base: { buffer: Buffer.alloc(4) } });
+  assert.deepEqual(px(fallback, 9, 16).slice(0, 3), STATUS_COLORS.tool, 'a wrong-sized icon falls back to the pill');
+});

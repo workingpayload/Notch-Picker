@@ -60,6 +60,7 @@ function fill(values) {
   showLyricsOptions(values);
   syncNav();
   applySearch();
+  if (window.PetSettings) window.PetSettings.fill(values);
 }
 
 // Sidebar: one page at a time, or every matching setting while searching.
@@ -163,7 +164,13 @@ let savedPage = null;
 try {
   savedPage = localStorage.getItem(PAGE_KEY);
 } catch {}
-showPage(savedPage || 'general');
+// The window can be opened on a page (Pet settings… opens Desktop pets).
+showPage(new URLSearchParams(location.search).get('page') || savedPage || 'general');
+window.notchApi.onShowPage((id) => {
+  searchInput.value = '';
+  applySearch();
+  showPage(id);
+});
 
 const hotkeyHelp = document.getElementById('hotkey-help');
 const hotkeyHelpDefault = hotkeyHelp.innerHTML;
@@ -210,8 +217,6 @@ function normalizeUrl(value) {
 }
 
 form.addEventListener('submit', (e) => e.preventDefault());
-
-document.getElementById('pet-settings').addEventListener('click', () => window.notchApi.openPetSettings());
 
 // The browser extension reports while downloads run; the status shows which browsers did lately.
 const extensionStatus = document.getElementById('extension-status');

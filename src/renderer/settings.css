@@ -792,3 +792,146 @@ button:hover {
   opacity: 0;
   transform: translateY(8px);
 }
+
+/* Desktop pets page */
+
+.settings-app .stage {
+  margin: 0 0 18px;
+  padding: 18px 12px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: radial-gradient(120% 90% at 50% 0%, rgba(10, 132, 255, 0.1), transparent 60%), linear-gradient(#1f1f23, #26262a);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+.settings-app.searching .stage {
+  display: none;
+}
+
+#preview {
+  display: block;
+  margin: 0 auto;
+  image-rendering: pixelated;
+}
+
+#preview-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.settings-app .note {
+  display: block;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.settings-app .sound-tests {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.settings-app .sound-tests span {
+  margin-right: 4px;
+  color: var(--muted);
+}
+
+#levels {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 16px;
+  padding: 4px 0 14px;
+}
+
+#levels:empty {
+  display: none;
+}
+
+.level-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+}
+
+.level-row b {
+  font-weight: 600;
+}
+
+.level-row .tier {
+  margin-left: 4px;
+}
+
+.level-row .tier.bronze {
+  color: #d08a4a;
+}
+
+.level-row .tier.silver {
+  color: #d6dde5;
+}
+
+.level-row .tier.gold {
+  color: #ffd60a;
+}
+
+.level-row .bar {
+  height: 4px;
+  border-radius: 2px;
+  background: #3a3a3e;
+  overflow: hidden;
+}
+
+.level-row .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+#sessions .session-row:first-child {
+  border-top: 0;
+}
+
+.session-row .swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #48484a;
+}
+
+.session-row .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-row small {
+  flex: none;
+}
+
+#sessions-note {
+  display: block;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+#sessions:empty + #sessions-note {
+  border-top: 0;
+  padding-top: 2px;
+}

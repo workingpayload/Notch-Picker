@@ -61,8 +61,9 @@ contextBridge.exposeInMainWorld('notchApi', {
   shelfClear: () => ipcRenderer.send('shelf:clear'),
   shelfMenu: (p) => ipcRenderer.send('shelf:menu', p),
   shelfDrag: (p) => ipcRenderer.send('shelf:drag', p),
-  // Pet settings window.
-  openPetSettings: () => ipcRenderer.send('pets:open'),
+  // Settings window: opened on a page (Pet settings… opens Desktop pets).
+  onShowPage: (cb) => ipcRenderer.on('settings:page', (_e, page) => cb(page)),
+  // Desktop pets page.
   getPetSessions: () => ipcRenderer.invoke('pets:sessions'),
   onPetSessions: (cb) => ipcRenderer.on('pets:sessions', (_e, list) => cb(list)),
   setPetSpecies: (sessionId, species) => ipcRenderer.send('pets:set-species', sessionId, species),

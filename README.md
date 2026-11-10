@@ -107,7 +107,7 @@ Downloads from Chrome, Edge, Brave, Opera, Vivaldi or Firefox show in the notch 
 
 ## Desktop pets (on by default)
 
-Small pixel-art pets react to your sessions: a **cat**, **dog**, **pig**, **sheep**, **goat**, **duck**, **bunny**, **fox** or **robot**. Turn them off with *Desktop pets* in the tray menu, *Settings → Desktop pets* or *Hide pets* in a pet's menu. Everything about them is in **Pet settings…** (tray menu, a pet's right-click menu, *Settings → Desktop pets*, or `npm start -- --pets`): a live preview of every species at the chosen size and cat colour, and:
+Small pixel-art pets react to your sessions: a **cat**, **dog**, **pig**, **sheep**, **goat**, **duck**, **bunny**, **fox** or **robot**. Turn them off with *Desktop pets* in the tray menu, *Settings → Desktop pets* or *Hide pets* in a pet's menu. Everything about them is on the **Desktop pets** page of Settings (*Pet settings…* in the tray menu or a pet's right-click menu opens it there, as does `npm start -- --pets`): a live preview of every species at the chosen size and cat colour, and:
 
 - **Size:** *Match the notch* (default) or *Tiny* to *Huge*, independent of the notch.
 - **Speed:** *Lazy*, *Normal* or *Zippy* walking, running and climbing.
@@ -125,7 +125,7 @@ Small pixel-art pets react to your sessions: a **cat**, **dog**, **pig**, **shee
   - **Backflip with confetti** when its session finishes its todo list.
   - **Sweating** when the session's context window is over 85% full, and **limping** (slower, no climbing) after three failed tool calls in a row or while the session shows an error.
 - **Levels and badges** (on by default): pets earn experience for their species as turns finish (1) and todo lists get done (5), kept across restarts in `pet-stats.json` in the settings folder. Levels need 5, 15, 30, 50… experience; a pet wears a **bronze** star from level 2, **silver** from 5 and **gold** from 10, hops with a ★ when it levels up, and shows its level on hover and in its menu.
-- **Sing and dance to music** (off by default; *Pet settings*, needs *Now playing*): while a song plays, awake pets on the taskbar or a window dance on the spot with a ♪, and pets hanging from the notch show a ♪. With synced **Lyrics**:
+- **Sing and dance to music** (off by default; *Settings → Desktop pets*, needs *Now playing*): while a song plays, awake pets on the taskbar or a window dance on the spot with a ♪, and pets hanging from the notch show a ♪. With synced **Lyrics**:
   - Pets hop and turn on each new line.
   - One pet (the most urgent session's) **sings the current line** in a speech bubble.
   - When the **chorus comes back** (two or more lines in a row that were sung before), they do the confetti backflip, at most once every 20 seconds.

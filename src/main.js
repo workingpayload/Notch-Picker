@@ -59,7 +59,6 @@ let dashboardWin = null;
 let usage = null;
 let fullscreen = null;
 let settingsWin = null;
-let petsWin = null;
 let lastPetSessions = '';
 let tray = null;
 let trayKey = '';
@@ -203,7 +202,6 @@ function applySettings(values) {
   send('sessions:ended', endedWithLabels());
   notches.broadcast('settings:changed', values);
   if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('settings:changed', values);
-  if (petsWin && !petsWin.isDestroyed()) petsWin.webContents.send('settings:changed', values);
   sendPetSessions(true);
   refresh(true);
 }
@@ -617,8 +615,11 @@ async function usageReport(days) {
   return report;
 }
 
-function openSettings() {
+// page: open on that settings page (menu items pass their MenuItem, which is ignored).
+function openSettings(page) {
+  page = typeof page === 'string' ? page : null;
   if (settingsWin && !settingsWin.isDestroyed()) {
+    if (page) settingsWin.webContents.send('settings:page', page);
     showWindow(settingsWin);
     return;
   }
@@ -638,7 +639,7 @@ function openSettings() {
     webPreferences,
   });
   settingsWin.setMenu(null);
-  settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+  settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'), page ? { query: { page } } : undefined);
   forwardConsole(settingsWin, 'settings');
   settingsWin.once('ready-to-show', () => showWindow(settingsWin));
   settingsWin.on('closed', () => {
@@ -646,36 +647,12 @@ function openSettings() {
   });
 }
 
-// Pet settings: all the pet options, a preview, and each session's pet.
+// Pet settings live on the Settings window's Desktop pets page.
 function openPetSettings() {
-  if (petsWin && !petsWin.isDestroyed()) {
-    showWindow(petsWin);
-    return;
-  }
-  petsWin = new BrowserWindow({
-    width: 460,
-    height: Math.min(900, screen.getPrimaryDisplay().workAreaSize.height - 40),
-    useContentSize: true,
-    resizable: false,
-    maximizable: false,
-    minimizable: false,
-    title: 'Notch Picker Pet settings',
-    icon: APP_ICON,
-    backgroundColor: '#1c1c1e',
-    autoHideMenuBar: true,
-    show: false,
-    webPreferences,
-  });
-  petsWin.setMenu(null);
-  petsWin.loadFile(path.join(__dirname, 'renderer', 'pets.html'));
-  forwardConsole(petsWin, 'pets');
-  petsWin.once('ready-to-show', () => showWindow(petsWin));
-  petsWin.on('closed', () => {
-    petsWin = null;
-  });
+  openSettings('pets');
 }
 
-// Live sessions and their pets, for the pet settings window.
+// Live sessions and their pets, for the Desktop pets page.
 function petSessions() {
   const chosen = settings.get().petSpecies;
   return latestDecorated.map((s) => ({
@@ -690,12 +667,12 @@ function petSessions() {
 }
 
 function sendPetSessions(force = false) {
-  if (!petsWin || petsWin.isDestroyed() || !pet) return;
+  if (!settingsWin || settingsWin.isDestroyed() || !pet) return;
   const list = petSessions();
   const json = JSON.stringify(list);
   if (!force && json === lastPetSessions) return;
   lastPetSessions = json;
-  petsWin.webContents.send('pets:sessions', list);
+  settingsWin.webContents.send('pets:sessions', list);
 }
 
 function send(channel, payload) {
@@ -895,7 +872,7 @@ function wellbeingTick() {
 }
 
 function sendPetLevels() {
-  if (petsWin && !petsWin.isDestroyed()) petsWin.webContents.send('pets:levels', petLevels());
+  if (settingsWin && !settingsWin.isDestroyed()) settingsWin.webContents.send('pets:levels', petLevels());
 }
 
 // Species choice for one session's pet: automatic (next in turn) or a fixed species.
@@ -1638,7 +1615,6 @@ function registerIpc() {
   // From the cat window or its carry overlay; anything else is ignored inside.
   ipcMain.on('pet:painted', (e) => pet.painted(e.sender));
   ipcMain.on('pet:sign', (e) => pet.signClicked(e.sender));
-  ipcMain.on('pets:open', () => openPetSettings());
   ipcMain.handle('pets:sessions', () => petSessions());
   ipcMain.handle('pets:levels', () => petLevels());
   ipcMain.on('pets:set-species', (_e, sessionId, species) => {

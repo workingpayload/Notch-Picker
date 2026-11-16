@@ -32,6 +32,7 @@ function pidAlive(pid) {
 
 // Lock files can outlive a crashed CLI and the PID can be reused, so confirm the process name once per PID.
 // Resolves the lower-case image name, '' when no such process, or null when it can't be checked.
+// A failed check (tasklist often times out right after the PC wakes) isn't cached, so it is retried.
 const pidNameCache = new Map();
 function pidImageName(pid) {
   if (pidNameCache.has(pid)) return pidNameCache.get(pid);
@@ -44,12 +45,20 @@ function pidImageName(pid) {
     });
   });
   pidNameCache.set(pid, pending);
+  if (process.platform === 'win32') {
+    pending.then((name) => {
+      if (name === null && pidNameCache.get(pid) === pending) pidNameCache.delete(pid);
+    });
+  }
   return pending;
 }
 
+// true/false, or null on Windows when the check failed (unknown: don't adopt the process yet).
+// Elsewhere there is no check, so any live PID is accepted.
 async function pidHasName(pid, names) {
   const name = await pidImageName(pid);
-  return name === null || names.has(name);
+  if (name === null) return process.platform === 'win32' ? null : true;
+  return names.has(name);
 }
 
 function forgetPid(pid) {
@@ -485,11 +494,18 @@ class SessionWatcher extends EventEmitter {
               if (live === null) keep(e.name);
               continue;
             }
-            if (pidAlive(pid) && (await pidIsCopilot(pid))) {
-              held.push({ id: e.name, dir, pid, wsl: null, lock: path.join(dir, f) });
-              return;
+            if (pidAlive(pid)) {
+              const copilot = await pidIsCopilot(pid);
+              // Unknown: keep a session already followed under this PID, but adopt nothing new
+              // on a guess (e.g. the Copilot app's copilot-runtime.exe holds session locks too).
+              const known = this.trackers.get(e.name);
+              if (copilot || (copilot === null && known && known.pid === pid && !known.wsl)) {
+                held.push({ id: e.name, dir, pid, wsl: null, lock: path.join(dir, f) });
+                return;
+              }
+              continue;
             }
-            if (!pidAlive(pid)) pidNameCache.delete(pid);
+            pidNameCache.delete(pid);
           }
         })
     );

@@ -361,3 +361,31 @@ test('The agent watcher tags sessions with their agent and remembers ended ones'
   );
   w.stop();
 });
+
+test('a failed process-name check is reported as unknown on Windows and retried, not cached', async () => {
+  const cp = require('child_process');
+  const realExecFile = cp.execFile;
+  const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const watcherPath = require.resolve('../src/watcher');
+  const cached = require.cache[watcherPath];
+  let calls = 0;
+  cp.execFile = (cmd, args, opts, cb) => {
+    calls++;
+    if (calls === 1) cb(new Error('timed out'));
+    else cb(null, '"copilot-runtime.exe","22224","Console","1","300,356 K"\r\n');
+  };
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  delete require.cache[watcherPath];
+  try {
+    const { pidHasName } = require('../src/watcher');
+    const names = new Set(['copilot.exe', 'node.exe']);
+    assert.equal(await pidHasName(22224, names), null);
+    assert.equal(await pidHasName(22224, names), false);
+    assert.equal(await pidHasName(22224, names), false);
+    assert.equal(calls, 2);
+  } finally {
+    cp.execFile = realExecFile;
+    Object.defineProperty(process, 'platform', realPlatform);
+    require.cache[watcherPath] = cached;
+  }
+});

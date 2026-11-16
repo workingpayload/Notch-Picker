@@ -158,7 +158,7 @@ class ClaudeProvider {
           if (!Number.isInteger(pid) || pid <= 0 || typeof id !== 'string' || !ID_RE.test(id) || info.spare === true) return;
           // A crashed CLI leaves its file behind, and the PID may since belong to something else.
           if (!pidAlive(pid)) return forgetPid(pid);
-          if (!(await pidHasName(pid, CLAUDE_PROCESS_NAMES))) return;
+          if ((await pidHasName(pid, CLAUDE_PROCESS_NAMES)) === false) return;
           const prev = out.get(id);
           if (prev && num(prev.updatedAt) >= num(info.updatedAt)) return;
           out.set(id, {
